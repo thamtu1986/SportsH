@@ -576,9 +576,9 @@
     const API = "https://xoiche.live/api/matches/?ordering=smart&page_size=100&site=xoiche";
     const BASE = "https://xoiche.live";
     
-    // Ưu tiên gọi thẳng như bản gốc, nếu bị chặn/lỗi mới qua proxy
+    // Gọi thẳng trực tiếp trước (phục vụ mở file trực tiếp trên máy tính), kèm dự phòng proxy nếu cần
     const PROXIES = [
-      (url) => url, // Gọi thẳng trước tiên
+      (url) => url,
       (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
       (url) => "https://corsproxy.io/?" + encodeURIComponent(url)
     ];
@@ -605,7 +605,7 @@
           clearTimeout(timer);
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
-          useProxyIndex = (useProxyIndex + i) % PROXIES.length; // Ghi nhớ cách gọi thành công
+          useProxyIndex = (useProxyIndex + i) % PROXIES.length;
           return data;
         } catch (e) {
           lastErr = e;
@@ -680,29 +680,44 @@
       return !!pickStreamUrl(m);
     }
 
+    // Tải đầy đủ tất cả các trang trận đấu từ API
     async function fetchMatches() {
-      statusText.textContent = "Đang tải trận đấu...";
+      statusText.textContent = "Đang tải toàn bộ trận đấu...";
       liveDot.style.display = "none";
       state.style.display = "block";
-      state.innerHTML = `<div class="spinner"></div>Đang tải...`;
+      state.innerHTML = `<div class="spinner"></div>Đang tải dữ liệu...`;
       try {
         let results = [];
         let url = API;
-        for (let i = 0; i < 4; i++) {
+        let safetyLoop = 0;
+        
+        while (url && safetyLoop < 10) {
           const data = await fetchJson(url);
-          results = results.concat(data.results || []);
-          if (!data.next) break;
-          url = data.next.startsWith("http") ? data.next : (BASE + data.next);
+          if (data && data.results) {
+            results = results.concat(data.results);
+          } else if (Array.isArray(data)) {
+            results = results.concat(data);
+            break;
+          }
+          if (data && data.next) {
+            url = data.next.startsWith("http") ? data.next : (BASE + data.next);
+          } else {
+            break;
+          }
+          safetyLoop++;
         }
+
         const watchable = results.filter(hasWatchableStream);
         const liveSoon = watchable.filter(m => classify(m) !== "done");
-        const done = watchable.filter(m => classify(m) === "done").slice(0, 20);
+        const done = watchable.filter(m => classify(m) === "done").slice(0, 50);
         allMatches = liveSoon.concat(done);
+
         const now = new Date();
         updatedAt.textContent = "Cập nhật " + now.toLocaleTimeString("vi-VN");
         const liveCount = allMatches.filter(m => classify(m) === "live").length;
         statusText.textContent = allMatches.length + " trận xem được · " + liveCount + " live";
         liveDot.style.display = liveCount ? "inline-block" : "none";
+        
         updateSportTabs();
         updateCounts();
         render();
