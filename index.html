@@ -576,11 +576,11 @@
     const API = "https://xoiche.live/api/matches/?ordering=smart&page_size=100&site=xoiche";
     const BASE = "https://xoiche.live";
     
-    // Sử dụng các dịch vụ proxy chuyên dụng định dạng JSON
+    // Ưu tiên gọi thẳng như bản gốc, nếu bị chặn/lỗi mới qua proxy
     const PROXIES = [
+      (url) => url, // Gọi thẳng trước tiên
       (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
-      (url) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url),
-      (url) => "https://thingproxy.freeboard.io/fetch/" + url
+      (url) => "https://corsproxy.io/?" + encodeURIComponent(url)
     ];
     let useProxyIndex = 0;
 
@@ -598,11 +598,14 @@
         try {
           const ctrl = new AbortController();
           const timer = setTimeout(() => ctrl.abort(), 15000);
-          const res = await fetch(reqUrl, { signal: ctrl.signal });
+          const res = await fetch(reqUrl, {
+            signal: ctrl.signal,
+            headers: { "Accept": "application/json" }
+          });
           clearTimeout(timer);
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
-          useProxyIndex = (useProxyIndex + i) % PROXIES.length; // Ghi nhớ proxy thành công
+          useProxyIndex = (useProxyIndex + i) % PROXIES.length; // Ghi nhớ cách gọi thành công
           return data;
         } catch (e) {
           lastErr = e;
