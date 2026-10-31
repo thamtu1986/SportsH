@@ -603,11 +603,14 @@
   <script>
     const API = "https://xoiche.live/api/matches/?ordering=smart&page_size=100&site=xoiche";
     const BASE = "https://xoiche.live";
-    
+    // File cùng repo — không bị CORS / 403
+    const LOCAL_JSON = "matches.json";
+
     const PROXIES = [
       (url) => url,
       (url) => "https://corsproxy.io/?" + encodeURIComponent(url),
-      (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url)
+      (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+      (url) => "https://corsproxy.org/?" + encodeURIComponent(url)
     ];
     let useProxyIndex = 0;
 
@@ -619,22 +622,39 @@
 
     async function fetchJson(url) {
       let lastErr;
+      // Mỗi lần thử lại từ đầu, không kẹt proxy lỗi
       for (let i = 0; i < PROXIES.length; i++) {
-        const currentProxy = PROXIES[(useProxyIndex + i) % PROXIES.length];
-        const reqUrl = currentProxy(url);
+        const idx = (useProxyIndex + i) % PROXIES.length;
+        const reqUrl = PROXIES[idx](url);
         try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 12000);
           const res = await fetch(reqUrl, {
-            headers: { "Accept": "application/json" }
+            signal: ctrl.signal,
+            headers: { "Accept": "application/json" },
+            cache: "no-store"
           });
+          clearTimeout(timer);
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
-          useProxyIndex = (useProxyIndex + i) % PROXIES.length;
+          useProxyIndex = idx;
           return data;
         } catch (e) {
           lastErr = e;
         }
       }
       throw lastErr || new Error("Network error");
+    }
+
+    async function fetchLocalMatches() {
+      try {
+        const res = await fetch(LOCAL_JSON + "?t=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data && Array.isArray(data.results)) return data;
+        if (Array.isArray(data)) return { results: data };
+      } catch (_) {}
+      return null;
     }
 
     const SPORT_LABELS = {
@@ -714,29 +734,39 @@
     }
 
     async function fetchMatches() {
-      statusText.textContent = "Đang tải toàn bộ trận đấu...";
+      statusText.textContent = "Đang tải trận đấu...";
       liveDot.style.display = "none";
       state.style.display = "block";
       state.innerHTML = `<div class="spinner"></div>Đang tải dữ liệu...`;
       try {
         let results = [];
-        let url = API;
-        let safetyLoop = 0;
-        
-        while (url && safetyLoop < 10) {
-          const data = await fetchJson(url);
-          if (data && data.results) {
-            results = results.concat(data.results);
-          } else if (Array.isArray(data)) {
-            results = results.concat(data);
-            break;
+        let source = "";
+
+        // 1) Ưu tiên matches.json cùng repo (tránh 403 / CORS trên GitHub Pages)
+        const local = await fetchLocalMatches();
+        if (local && local.results && local.results.length) {
+          results = local.results;
+          source = "local";
+        } else {
+          // 2) Gọi API xoiche (có proxy dự phòng)
+          let url = API;
+          let safetyLoop = 0;
+          while (url && safetyLoop < 10) {
+            const data = await fetchJson(url);
+            if (data && data.results) {
+              results = results.concat(data.results);
+            } else if (Array.isArray(data)) {
+              results = results.concat(data);
+              break;
+            }
+            if (data && data.next) {
+              url = data.next.startsWith("http") ? data.next : (BASE + data.next);
+            } else {
+              break;
+            }
+            safetyLoop++;
           }
-          if (data && data.next) {
-            url = data.next.startsWith("http") ? data.next : (BASE + data.next);
-          } else {
-            break;
-          }
-          safetyLoop++;
+          source = "api";
         }
 
         const watchable = results.filter(hasWatchableStream);
@@ -745,11 +775,11 @@
         allMatches = liveSoon.concat(done);
 
         const now = new Date();
-        updatedAt.textContent = "Cập nhật " + now.toLocaleTimeString("vi-VN");
+        updatedAt.textContent = "Cập nhật " + now.toLocaleTimeString("vi-VN") + (source === "local" ? " · cache" : "");
         const liveCount = allMatches.filter(m => classify(m) === "live").length;
         statusText.textContent = allMatches.length + " trận xem được · " + liveCount + " live";
         liveDot.style.display = liveCount ? "inline-block" : "none";
-        
+
         updateSportTabs();
         updateCounts();
         render();
