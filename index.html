@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0b0f14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>SportsH</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --bg2: #121820;
+      --bg3: #1a222d;
+      --card: #151c27;
+      --border: #243041;
+      --text: #e8eef6;
+      --muted: #8b9bb0;
+      --accent: #00e676;
+      --accent2: #00c853;
+      --live: #ff1744;
+      --warn: #ffab00;
+      --radius: 14px;
+      --shadow: 0 8px 28px rgba(0,0,0,.35);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
+    body.player-open { overflow: hidden; height: 100vh; height: 100dvh; }
+
+    /* Header */
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: linear-gradient(180deg, #0d131b 0%, rgba(11,15,20,.92) 100%);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+    }
+    .header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      font-size: 1.25rem;
+      letter-spacing: -0.02em;
+    }
+    .brand-badge {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #00b0ff);
+      display: grid;
+      place-items: center;
+      font-size: 16px;
+      box-shadow: 0 0 20px rgba(0,230,118,.35);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .icon-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: .15s ease;
+      font-size: 16px;
+    }
+    .icon-btn:hover, .icon-btn:focus {
+      border-color: var(--accent);
+      color: var(--accent);
+      outline: none;
+    }
+
+    /* Tabs */
+    .tabs {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 12px 16px 0;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tabs.sports { padding-top: 14px; padding-bottom: 0; }
+    .tab {
+      flex: 0 0 auto;
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: .9rem;
+      cursor: pointer;
+      transition: .15s ease;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tab:hover { color: var(--text); border-color: #3a4a5e; }
+    .tab.active {
+      background: linear-gradient(135deg, rgba(0,230,118,.15), rgba(0,176,255,.12));
+      border-color: rgba(0,230,118,.45);
+      color: var(--accent);
+    }
+    .tab.sport-tab {
+      padding: 11px 18px;
+      font-size: .95rem;
+      background: var(--bg3);
+    }
+    .tab.sport-tab.active {
+      background: linear-gradient(135deg, #ff1744, #ff5252);
+      border-color: transparent;
+      color: #fff;
+      box-shadow: 0 4px 18px rgba(255,23,68,.35);
+    }
+    .tab .count {
+      opacity: .75;
+      font-weight: 500;
+    }
+    .tab .live-tag {
+      font-size: .65rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: var(--live);
+      color: #fff;
+    }
+    .tab.sport-tab.active .live-tag {
+      background: rgba(255,255,255,.25);
+    }
+
+    /* Search */
+    .search-wrap {
+      max-width: 1200px;
+      margin: 12px auto 0;
+      padding: 0 16px;
+    }
+    .search {
+      width: 100%;
+      padding: 12px 14px 12px 42px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='%238b9bb0' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242.656a5 5 0 1 1 0-10 5 5 0 0 1 0 10z'/%3E%3C/svg%3E") 14px center no-repeat;
+      color: var(--text);
+      font-size: .95rem;
+      outline: none;
+    }
+    .search:focus { border-color: var(--accent); }
+
+    /* Content */
+    .main {
+      flex: 1;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: .85rem;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: inline-block;
+      margin-right: 6px;
+      box-shadow: 0 0 10px var(--accent);
+      animation: pulse 1.6s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .45; }
+    }
+
+    /* Match grid */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    @media (min-width: 720px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (min-width: 1100px) {
+      .grid { grid-template-columns: 1fr 1fr 1fr; }
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      cursor: pointer;
+      transition: .18s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .card:hover, .card:focus {
+      border-color: rgba(0,230,118,.45);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+      outline: none;
+    }
+    .card.live {
+      border-color: rgba(255,23,68,.35);
+      background: linear-gradient(180deg, rgba(255,23,68,.08), var(--card) 40%);
+    }
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .league {
+      font-size: .78rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 70%;
+    }
+    .badge {
+      font-size: .72rem;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 999px;
+      letter-spacing: .02em;
+    }
+    .badge.live {
+      background: rgba(255,23,68,.18);
+      color: #ff5c7a;
+      border: 1px solid rgba(255,23,68,.35);
+    }
+    .badge.soon {
+      background: rgba(255,171,0,.12);
+      color: #ffc107;
+      border: 1px solid rgba(255,171,0,.28);
+    }
+    .badge.done {
+      background: rgba(139,155,176,.12);
+      color: var(--muted);
+      border: 1px solid rgba(139,155,176,.2);
+    }
+
+    .teams {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 8px;
+      align-items: center;
+    }
+    .team {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .team img {
+      width: 42px;
+      height: 42px;
+      object-fit: contain;
+      border-radius: 50%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+    }
+    .team-name {
+      font-size: .86rem;
+      font-weight: 600;
+      text-align: center;
+      line-height: 1.25;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .score-box {
+      text-align: center;
+      min-width: 64px;
+    }
+    .score {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: .02em;
+    }
+    .score.live { color: #ff5c7a; }
+    .time {
+      font-size: .75rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .card-bottom {
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .watch-btn {
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: none;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #04120a;
+      font-weight: 700;
+      font-size: .82rem;
+      cursor: pointer;
+    }
+    .views {
+      font-size: .75rem;
+      color: var(--muted);
+    }
+
+    /* Empty / loading */
+    .state {
+      text-align: center;
+      padding: 48px 16px;
+      color: var(--muted);
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      margin: 0 auto 14px;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Player overlay */
+    .player-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: #000;
+      display: none;
+      flex-direction: column;
+    }
+    .player-overlay.open { display: flex; }
+    .player-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: #0b0f14;
+      border-bottom: 1px solid #1c2530;
+    }
+    .player-title {
+      flex: 1;
+      font-weight: 600;
+      font-size: .95rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .player-back {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 44px;
+      padding: 0 18px;
+      border-radius: 12px;
+      border: none;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #04120a;
+      font-size: .95rem;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .player-back:hover { filter: brightness(1.08); }
+    .player-wrap {
+      flex: 1;
+      display: flex;
+      background: #000;
+      min-height: 0;
+      position: relative;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      max-height: 100%;
+      background: #000;
+      outline: none;
+    }
+    .player-fallback {
+      flex: 1;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      color: var(--muted);
+      padding: 24px;
+      text-align: center;
+    }
+    /* Nút quay lại nổi khi xem full */
+    .fab-back {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 20;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      height: 48px;
+      padding: 0 18px;
+      border-radius: 14px;
+      border: none;
+      background: rgba(0,0,0,.75);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    }
+    .player-overlay.open .fab-back { display: flex; }
+    .fab-back:hover { background: rgba(0,230,118,.9); color: #04120a; }
+
+    .footer {
+      text-align: center;
+      padding: 18px 16px 28px;
+      color: #5d6b7c;
+      font-size: .78rem;
+    }
+
+    /* TV focus */
+    .card:focus-visible, .tab:focus-visible, .icon-btn:focus-visible, .player-back:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* Mobile */
+    @media (max-width: 640px) {
+      .header { padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top)); }
+      .brand { font-size: 1.1rem; }
+      .tabs { padding-left: 12px; padding-right: 12px; }
+      .tab { padding: 9px 12px; font-size: .82rem; }
+      .tab.sport-tab { padding: 10px 14px; font-size: .88rem; }
+      .search-wrap { padding: 0 12px; }
+      .main { padding: 12px; }
+      .team img { width: 36px; height: 36px; }
+      .score { font-size: 1.2rem; }
+      .team-name { font-size: .8rem; }
+      .watch-btn { padding: 10px 14px; font-size: .85rem; }
+      .player-bar {
+        padding: 10px 12px;
+        padding-top: max(10px, env(safe-area-inset-top));
+      }
+      .player-back { height: 42px; padding: 0 12px; font-size: .85rem; }
+      .fab-back {
+        top: max(12px, env(safe-area-inset-top));
+        left: 12px;
+        height: 44px;
+      }
+      .footer { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+    }
+
+    /* TV Box / màn lớn + điều khiển từ xa */
+    @media (min-width: 1280px) {
+      .tab, .icon-btn, .watch-btn, .player-back, .card {
+        /* vùng bấm lớn hơn cho remote */
+      }
+      .tab { padding: 12px 20px; font-size: 1rem; }
+      .watch-btn { padding: 12px 18px; font-size: .95rem; }
+      .card { padding: 18px; }
+      .team img { width: 52px; height: 52px; }
+      .score { font-size: 1.5rem; }
+      .team-name { font-size: .95rem; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-badge">⚽</div>
+        <span>SportsH</span>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="btnRefresh" title="Làm mới">⟳</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Tab môn thể thao (chính) -->
+  <div class="tabs sports" id="sportTabs">
+    <button class="tab sport-tab active" data-sport="all">Tất cả</button>
+  </div>
+
+  <!-- Tab trạng thái (phụ) -->
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="live">Đang diễn ra <span class="count" id="cLive">0</span></button>
+    <button class="tab" data-tab="soon">Sắp đá <span class="count" id="cSoon">0</span></button>
+    <button class="tab" data-tab="done">Đã kết thúc <span class="count" id="cDone">0</span></button>
+    <button class="tab" data-tab="all">Tất cả trận <span class="count" id="cAll">0</span></button>
+  </div>
+
+  <div class="search-wrap">
+    <input class="search" id="search" type="search" placeholder="Tìm đội, giải đấu..." />
+  </div>
+
+  <main class="main">
+    <div class="status-bar">
+      <div><span class="dot" id="liveDot" style="display:none"></span><span id="statusText">Đang tải...</span></div>
+      <div id="updatedAt"></div>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="state" id="state"></div>
+  </main>
+
+  <div class="footer">SportsH · Tự động cập nhật trận đấu</div>
+
+  <!-- Player -->
+  <div class="player-overlay" id="playerOverlay">
+    <div class="player-bar">
+      <button class="player-back" id="btnClosePlayer" type="button">← Quay lại trang chủ</button>
+      <div class="player-title" id="playerTitle">Đang phát</div>
+    </div>
+    <div class="player-wrap">
+      <button class="fab-back" id="btnFabBack" type="button">← Quay lại</button>
+      <video id="video" controls playsinline autoplay></video>
+      <div class="player-fallback" id="playerFallback">
+        <div>Không phát được trên trình duyệt này.</div>
+        <button class="player-back" id="btnBackFromFallback" type="button" style="margin-top:8px">← Quay lại trang chủ</button>
+        <a id="openExternal" href="#" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;margin-top:8px">Mở link stream (tab mới)</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+  <script>
+    const API = "https://xoiche.live/api/matches/?ordering=smart&page_size=100&site=xoiche";
+    const BASE = "https://xoiche.live";
+
+    let allMatches = [];
+    let currentTab = "live";
+    let currentSport = "all";
+    let hls = null;
+    let refreshTimer = null;
+
+    const SPORT_LABELS = {
+      football: "⚽ Bóng đá",
+      basketball: "🏀 Bóng rổ",
+      volleyball: "🏐 Bóng chuyền",
+      tennis: "🎾 Quần vợt",
+      badminton: "🏸 Cầu lông",
+      tabletennis: "🏓 Bóng bàn",
+      esports: "🎮 Esports",
+      hockey: "🏒 Khúc côn cầu",
+      baseball: "⚾ Bóng chày",
+      handball: "🤾 Bóng ném"
+    };
+
+    const grid = document.getElementById("grid");
+    const state = document.getElementById("state");
+    const statusText = document.getElementById("statusText");
+    const updatedAt = document.getElementById("updatedAt");
+    const liveDot = document.getElementById("liveDot");
+    const searchInput = document.getElementById("search");
+
+    function absUrl(u) {
+      if (!u) return "";
+      if (u.startsWith("http")) return u;
+      return BASE + u;
+    }
+
+    function fmtTime(iso) {
+      if (!iso) return "";
+      try {
+        const d = new Date(iso);
+        return d.toLocaleString("vi-VN", {
+          day: "2-digit", month: "2-digit",
+          hour: "2-digit", minute: "2-digit"
+        });
+      } catch { return iso; }
+    }
+
+    function classify(m) {
+      const s = (m.status || "").toLowerCase();
+      if (s === "live" || s === "inplay" || s === "1h" || s === "2h" || s === "ht" || s === "half_time" || s === "halftime") return "live";
+      if (s === "finished" || s === "ft" || s === "after_pen" || s === "after_et" || s === "postponed" || s === "cancelled") return "done";
+      return "soon";
+    }
+
+    function pickStreamUrl(m) {
+      if (m.primary_stream_url && String(m.primary_stream_url).includes(".m3u8")) return m.primary_stream_url;
+      const commentators = m.commentators || [];
+      for (const c of commentators) {
+        if (c.stream_url && String(c.stream_url).includes(".m3u8")) return c.stream_url;
+        if (c.flv_stream_url && String(c.flv_stream_url).includes(".m3u8")) return c.flv_stream_url;
+      }
+      const cs = m.commentator_streams || [];
+      for (const c of cs) {
+        if (c.stream_url && String(c.stream_url).includes(".m3u8")) return c.stream_url;
+        if (c.commentator && c.commentator.stream_url && String(c.commentator.stream_url).includes(".m3u8")) {
+          return c.commentator.stream_url;
+        }
+      }
+      if (m.backup_stream_url && String(m.backup_stream_url).includes(".m3u8")) return m.backup_stream_url;
+      return null;
+    }
+
+    function hasWatchableStream(m) {
+      return !!pickStreamUrl(m);
+    }
+
+    async function fetchMatches() {
+      statusText.textContent = "Đang tải trận đấu...";
+      liveDot.style.display = "none";
+      try {
+        let results = [];
+        let url = API;
+        for (let i = 0; i < 4; i++) {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          results = results.concat(data.results || []);
+          if (!data.next) break;
+          url = data.next.startsWith("http") ? data.next : (BASE + data.next);
+        }
+        // Chỉ giữ trận CÓ link xem được
+        const watchable = results.filter(hasWatchableStream);
+        const liveSoon = watchable.filter(m => classify(m) !== "done");
+        const done = watchable.filter(m => classify(m) === "done").slice(0, 20);
+        allMatches = liveSoon.concat(done);
+        const now = new Date();
+        updatedAt.textContent = "Cập nhật " + now.toLocaleTimeString("vi-VN");
+        const liveCount = allMatches.filter(m => classify(m) === "live").length;
+        statusText.textContent = allMatches.length + " trận xem được · " + liveCount + " live";
+        liveDot.style.display = liveCount ? "inline-block" : "none";
+        updateSportTabs();
+        updateCounts();
+        render();
+      } catch (e) {
+        console.error(e);
+        statusText.textContent = "Lỗi tải dữ liệu";
+        state.innerHTML = `<div class="spinner"></div>Không tải được danh sách trận.<br/>Kiểm tra mạng và thử lại.`;
+        grid.innerHTML = "";
+      }
+    }
+
+    async function resolveStream(match) {
+      const direct = pickStreamUrl(match);
+      if (direct) return direct;
+      try {
+        const res = await fetch(BASE + "/api/matches/" + match.id + "/");
+        if (!res.ok) return null;
+        const d = await res.json();
+        return pickStreamUrl(d);
+      } catch (e) {
+        console.error(e);
+      }
+      return null;
+    }
+
+    function sportSlug(m) {
+      return (m.sport_slug || m.sport?.slug || "other").toLowerCase();
+    }
+
+    function sportName(m) {
+      return m.sport_name || m.sport?.name || "Khác";
+    }
+
+    function updateSportTabs() {
+      const counts = {};
+      const liveBySport = {};
+      allMatches.forEach(m => {
+        const s = sportSlug(m);
+        counts[s] = (counts[s] || 0) + 1;
+        if (classify(m) === "live") liveBySport[s] = (liveBySport[s] || 0) + 1;
+      });
+      // Luôn hiện các môn phổ biến như xoiche
+      const fixed = ["football","volleyball","basketball","tennis","badminton","tabletennis","esports"];
+      const extra = Object.keys(counts).filter(s => !fixed.includes(s));
+      const slugs = fixed.concat(extra);
+      const wrap = document.getElementById("sportTabs");
+      let html = `<button class="tab sport-tab ${currentSport === "all" ? "active" : ""}" data-sport="all">Tất cả</button>`;
+      slugs.forEach(s => {
+        const label = SPORT_LABELS[s] || ("• " + s);
+        const active = currentSport === s ? "active" : "";
+        const live = liveBySport[s] || 0;
+        const liveHtml = live > 0 ? `<span class="live-tag">LIVE</span>` : "";
+        html += `<button class="tab sport-tab ${active}" data-sport="${s}">${label}${liveHtml}</button>`;
+      });
+      wrap.innerHTML = html;
+    }
+
+    function updateCounts() {
+      const byStatus = (cat) => allMatches.filter(m => {
+        if (currentSport !== "all" && sportSlug(m) !== currentSport) return false;
+        return classify(m) === cat;
+      }).length;
+      const live = byStatus("live");
+      const soon = byStatus("soon");
+      const done = byStatus("done");
+      const all = allMatches.filter(m => currentSport === "all" || sportSlug(m) === currentSport).length;
+      document.getElementById("cLive").textContent = live;
+      document.getElementById("cSoon").textContent = soon;
+      document.getElementById("cDone").textContent = done;
+      document.getElementById("cAll").textContent = all;
+    }
+
+    function filtered() {
+      const q = (searchInput.value || "").trim().toLowerCase();
+      return allMatches.filter(m => {
+        const cat = classify(m);
+        if (currentTab !== "all" && cat !== currentTab) return false;
+        if (currentSport !== "all" && sportSlug(m) !== currentSport) return false;
+        if (!q) return true;
+        const home = m.home_team?.name || m.home_team_name || "";
+        const away = m.away_team?.name || m.away_team_name || "";
+        const tour = m.tournament?.name || m.tournament_name || "";
+        return (home + " " + away + " " + tour).toLowerCase().includes(q);
+      });
+    }
+
+    function render() {
+      const list = filtered();
+      grid.innerHTML = "";
+      if (!list.length) {
+        state.style.display = "block";
+        state.innerHTML = allMatches.length
+          ? "Không có trận phù hợp."
+          : `<div class="spinner"></div>Đang tải...`;
+        return;
+      }
+      state.style.display = "none";
+
+      const frag = document.createDocumentFragment();
+      list.forEach(m => {
+        const cat = classify(m);
+        const home = m.home_team?.name || m.home_team_name || "?";
+        const away = m.away_team?.name || m.away_team_name || "?";
+        const hs = m.home_score ?? 0;
+        const as = m.away_score ?? 0;
+        const league = m.tournament?.name || m.tournament_name || m.sport?.name || m.sport_name || "Thể thao";
+        const logoHome = absUrl(m.home_team?.logo || m.home_team_logo);
+        const logoAway = absUrl(m.away_team?.logo || m.away_team_logo);
+        const thumb = absUrl(m.thumbnail);
+
+        const card = document.createElement("div");
+        card.className = "card" + (cat === "live" ? " live" : "");
+        card.tabIndex = 0;
+        card.innerHTML = `
+          <div class="card-top">
+            <div class="league" title="${league}">${league}</div>
+            <div class="badge ${cat}">${cat === "live" ? "LIVE" : cat === "soon" ? "SẮP ĐÁ" : "HẾT"}</div>
+          </div>
+          <div class="teams">
+            <div class="team">
+              <img src="${logoHome || thumb}" alt="" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2242%22%3E%3Crect fill=%22%231a222d%22 width=%2242%22 height=%2242%22 rx=%2221%22/%3E%3C/svg%3E'" />
+              <div class="team-name">${home}</div>
+            </div>
+            <div class="score-box">
+              <div class="score ${cat === "live" ? "live" : ""}">${hs} - ${as}</div>
+              <div class="time">${cat === "soon" ? fmtTime(m.start_time) : (m.match_time || "")}</div>
+            </div>
+            <div class="team">
+              <img src="${logoAway || thumb}" alt="" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2242%22%3E%3Crect fill=%22%231a222d%22 width=%2242%22 height=%2242%22 rx=%2221%22/%3E%3C/svg%3E'" />
+              <div class="team-name">${away}</div>
+            </div>
+          </div>
+          <div class="card-bottom">
+            <button class="watch-btn">Xem ngay</button>
+            <div class="views">${m.views_count ? (m.views_count + " xem") : ""}</div>
+          </div>
+        `;
+        const open = () => openPlayer(m);
+        card.addEventListener("click", open);
+        card.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+        frag.appendChild(card);
+      });
+      grid.appendChild(frag);
+    }
+
+    async function openPlayer(m) {
+      const title = `${m.home_team?.name || m.home_team_name || "?"} vs ${m.away_team?.name || m.away_team_name || "?"}`;
+      document.getElementById("playerTitle").textContent = "Đang lấy link xem...";
+      document.getElementById("playerOverlay").classList.add("open");
+      document.body.classList.add("player-open");
+      try { history.pushState({ player: true }, ""); } catch (_) {}
+
+      const video = document.getElementById("video");
+      const fallback = document.getElementById("playerFallback");
+      video.style.display = "block";
+      fallback.style.display = "none";
+      if (hls) { hls.destroy(); hls = null; }
+      video.removeAttribute("src");
+      video.load();
+
+      const url = await resolveStream(m);
+      document.getElementById("playerTitle").textContent = title;
+      if (!url) {
+        video.style.display = "none";
+        fallback.style.display = "flex";
+        fallback.querySelector("div").textContent = "Trận này chưa có link xem.";
+        document.getElementById("openExternal").style.display = "none";
+        return;
+      }
+      document.getElementById("openExternal").style.display = "";
+      document.getElementById("openExternal").href = url;
+      fallback.querySelector("div").textContent = "Không phát được trên trình duyệt này.";
+
+      if (window.Hls && Hls.isSupported()) {
+        hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            video.style.display = "none";
+            fallback.style.display = "flex";
+          }
+        });
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = url;
+        video.play().catch(() => {});
+      } else {
+        video.style.display = "none";
+        fallback.style.display = "flex";
+      }
+    }
+
+    function closePlayer() {
+      document.getElementById("playerOverlay").classList.remove("open");
+      document.body.classList.remove("player-open");
+      const video = document.getElementById("video");
+      if (hls) { hls.destroy(); hls = null; }
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    }
+
+    // Events
+    document.getElementById("tabs").addEventListener("click", e => {
+      const btn = e.target.closest(".tab");
+      if (!btn) return;
+      document.querySelectorAll("#tabs .tab").forEach(t => t.classList.remove("active"));
+      btn.classList.add("active");
+      currentTab = btn.dataset.tab;
+      updateCounts();
+      render();
+    });
+    document.getElementById("sportTabs").addEventListener("click", e => {
+      const btn = e.target.closest(".tab");
+      if (!btn) return;
+      document.querySelectorAll("#sportTabs .tab").forEach(t => t.classList.remove("active"));
+      btn.classList.add("active");
+      currentSport = btn.dataset.sport || "all";
+      updateCounts();
+      render();
+    });
+    document.getElementById("btnRefresh").addEventListener("click", fetchMatches);
+    document.getElementById("btnClosePlayer").addEventListener("click", closePlayer);
+    document.getElementById("btnFabBack").addEventListener("click", closePlayer);
+    document.getElementById("btnBackFromFallback").addEventListener("click", closePlayer);
+    searchInput.addEventListener("input", render);
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape") closePlayer();
+    });
+    // Chặn nút Back của trình duyệt khi đang xem → chỉ đóng player
+    history.pushState({ player: false }, "");
+    window.addEventListener("popstate", () => {
+      const overlay = document.getElementById("playerOverlay");
+      if (overlay.classList.contains("open")) {
+        closePlayer();
+        history.pushState({ player: false }, "");
+      }
+    });
+
+    // Auto refresh
+    function startAutoRefresh() {
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = setInterval(fetchMatches, 60000);
+    }
+
+    fetchMatches();
+    startAutoRefresh();
+  </script>
+</body>
+</html>
