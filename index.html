@@ -538,6 +538,59 @@
       .score { font-size: 1.5rem; }
       .team-name { font-size: .95rem; }
     }
+
+    .mode-tabs {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 12px 16px 0;
+      display: flex;
+      gap: 8px;
+    }
+    .mode-tab {
+      flex: 1;
+      max-width: 200px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      color: var(--muted);
+      font-weight: 700;
+      font-size: .95rem;
+      cursor: pointer;
+      text-align: center;
+    }
+    .mode-tab.active {
+      background: linear-gradient(135deg, rgba(0,230,118,.18), rgba(0,176,255,.12));
+      border-color: rgba(0,230,118,.45);
+      color: var(--accent);
+    }
+    .channel-card .channel-logo {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      object-fit: contain;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+    }
+    .channel-card .channel-meta {
+      flex: 1;
+      min-width: 0;
+    }
+    .channel-card .channel-name {
+      font-weight: 700;
+      font-size: .95rem;
+      margin-bottom: 4px;
+    }
+    .channel-card .channel-group {
+      font-size: .75rem;
+      color: var(--muted);
+    }
+    .channel-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    #matchPanel.hidden, #channelFilters.hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -553,19 +606,34 @@
     </div>
   </header>
 
-  <div class="tabs sports" id="sportTabs">
-    <button class="tab sport-tab active" data-sport="all">Tất cả</button>
+  <div class="mode-tabs" id="modeTabs">
+    <button class="mode-tab active" data-mode="matches" type="button">⚽ Trận đấu</button>
+    <button class="mode-tab" data-mode="channels" type="button">📺 Kênh live</button>
   </div>
 
-  <div class="tabs" id="tabs">
-    <button class="tab active" data-tab="live">Đang diễn ra <span class="count" id="cLive">0</span></button>
-    <button class="tab" data-tab="soon">Sắp đá <span class="count" id="cSoon">0</span></button>
-    <button class="tab" data-tab="done">Đã kết thúc <span class="count" id="cDone">0</span></button>
-    <button class="tab" data-tab="all">Tất cả trận <span class="count" id="cAll">0</span></button>
+  <div id="matchPanel">
+    <div class="tabs sports" id="sportTabs">
+      <button class="tab sport-tab active" data-sport="all">Tất cả</button>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="live">Đang diễn ra <span class="count" id="cLive">0</span></button>
+      <button class="tab" data-tab="soon">Sắp đá <span class="count" id="cSoon">0</span></button>
+      <button class="tab" data-tab="done">Đã kết thúc <span class="count" id="cDone">0</span></button>
+      <button class="tab" data-tab="all">Tất cả trận <span class="count" id="cAll">0</span></button>
+    </div>
+  </div>
+
+  <div class="tabs sports hidden" id="channelFilters">
+    <button class="tab sport-tab active" data-chsrc="all">Tất cả nguồn</button>
+    <button class="tab sport-tab" data-chsrc="giovang">Giờ Vàng</button>
+    <button class="tab sport-tab" data-chsrc="cola">Cola TV</button>
+    <button class="tab sport-tab" data-chsrc="phalang">PhaLang</button>
+    <button class="tab sport-tab" data-chsrc="live">Gộp tất cả</button>
   </div>
 
   <div class="search-wrap">
-    <input class="search" id="search" type="search" placeholder="Tìm đội, giải đấu..." />
+    <input class="search" id="search" type="search" placeholder="Tìm đội, giải đấu, kênh..." />
   </div>
 
   <main class="main">
@@ -605,6 +673,13 @@
     const BASE = "https://xoiche.live";
     // File cùng repo — không bị CORS / 403
     const LOCAL_JSON = "matches.json";
+    // Nguồn M3U đa nguồn (bongda-1)
+    const CHANNEL_SOURCES = {
+      giovang: "https://bongda-1.onrender.com/giovang.m3u",
+      cola: "https://bongda-1.onrender.com/cola.m3u",
+      phalang: "https://bongda-1.onrender.com/phalang.m3u",
+      live: "https://bongda-1.onrender.com/live.m3u"
+    };
 
     const PROXIES = [
       (url) => url,
@@ -615,8 +690,11 @@
     let useProxyIndex = 0;
 
     let allMatches = [];
+    let allChannels = [];
+    let currentMode = "matches"; // matches | channels
     let currentTab = "live";
     let currentSport = "all";
+    let currentChSrc = "all"; // all = load giovang+cola+phalang
     let hls = null;
     let refreshTimer = null;
 
@@ -655,6 +733,154 @@
         if (Array.isArray(data)) return { results: data };
       } catch (_) {}
       return null;
+    }
+
+    async function fetchText(url) {
+      let lastErr;
+      for (let i = 0; i < PROXIES.length; i++) {
+        const idx = (useProxyIndex + i) % PROXIES.length;
+        const reqUrl = PROXIES[idx](url);
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 20000);
+          const res = await fetch(reqUrl, { signal: ctrl.signal, cache: "no-store" });
+          clearTimeout(timer);
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const text = await res.text();
+          useProxyIndex = idx;
+          return text;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error("Network error");
+    }
+
+    function parseM3U(text, sourceTag) {
+      const lines = String(text || "").split(/\r?\n/);
+      const list = [];
+      let cur = null;
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line) continue;
+        if (line.startsWith("#EXTINF:")) {
+          const comma = line.indexOf(",");
+          const meta = comma >= 0 ? line.slice(0, comma) : line;
+          const name = comma >= 0 ? line.slice(comma + 1).trim() : "Kênh";
+          let group = "";
+          let logo = "";
+          const g = meta.match(/group-title="([^"]*)"/i);
+          const l = meta.match(/tvg-logo="([^"]*)"/i);
+          if (g) group = g[1];
+          if (l) logo = l[1];
+          cur = { name, group, logo, source: sourceTag, url: "" };
+        } else if (!line.startsWith("#") && cur) {
+          cur.url = line;
+          if (cur.url) list.push(cur);
+          cur = null;
+        }
+      }
+      return list;
+    }
+
+    async function loadChannels() {
+      statusText.textContent = "Đang tải kênh live...";
+      state.style.display = "block";
+      state.innerHTML = `<div class="spinner"></div>Đang tải playlist...`;
+      grid.innerHTML = "";
+      try {
+        let keys = [];
+        if (currentChSrc === "all") keys = ["giovang", "cola", "phalang"];
+        else if (currentChSrc === "live") keys = ["live"];
+        else keys = [currentChSrc];
+
+        const chunks = await Promise.all(keys.map(async (k) => {
+          try {
+            const text = await fetchText(CHANNEL_SOURCES[k]);
+            return parseM3U(text, k);
+          } catch (e) {
+            console.error("channel source", k, e);
+            return [];
+          }
+        }));
+        // gộp + bỏ trùng theo url
+        const seen = new Set();
+        allChannels = [];
+        chunks.flat().forEach((ch) => {
+          if (!ch.url || seen.has(ch.url)) return;
+          seen.add(ch.url);
+          allChannels.push(ch);
+        });
+        updatedAt.textContent = "Cập nhật " + new Date().toLocaleTimeString("vi-VN") + " · M3U";
+        statusText.textContent = allChannels.length + " kênh";
+        liveDot.style.display = allChannels.length ? "inline-block" : "none";
+        renderChannels();
+      } catch (e) {
+        console.error(e);
+        statusText.textContent = "Lỗi tải kênh";
+        state.innerHTML = `Không tải được playlist.<br/>Server bongda-1 có thể đang ngủ — bấm ⟳ thử lại.<br/><span style="font-size:.75rem;opacity:.7">${e.message || ""}</span>`;
+      }
+    }
+
+    function filteredChannels() {
+      const q = (searchInput.value || "").trim().toLowerCase();
+      return allChannels.filter((ch) => {
+        if (!q) return true;
+        return (ch.name + " " + ch.group + " " + ch.source).toLowerCase().includes(q);
+      });
+    }
+
+    function renderChannels() {
+      const list = filteredChannels();
+      grid.innerHTML = "";
+      if (!list.length) {
+        state.style.display = "block";
+        state.innerHTML = allChannels.length ? "Không có kênh phù hợp." : `<div class="spinner"></div>Đang tải...`;
+        return;
+      }
+      state.style.display = "none";
+      const frag = document.createDocumentFragment();
+      list.forEach((ch) => {
+        const card = document.createElement("div");
+        card.className = "card channel-card";
+        card.tabIndex = 0;
+        const logo = ch.logo || "";
+        card.innerHTML = `
+          <img class="channel-logo" src="${logo}" alt="" onerror="this.style.display='none'" />
+          <div class="channel-meta">
+            <div class="channel-name">${ch.name}</div>
+            <div class="channel-group">${ch.group || ch.source || "Live"}</div>
+          </div>
+          <button class="watch-btn" type="button">Xem</button>
+        `;
+        const open = () => playUrl(ch.url, ch.name);
+        card.addEventListener("click", open);
+        card.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+        });
+        frag.appendChild(card);
+      });
+      grid.appendChild(frag);
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.querySelectorAll("#modeTabs .mode-tab").forEach((t) => {
+        t.classList.toggle("active", t.dataset.mode === mode);
+      });
+      const matchPanel = document.getElementById("matchPanel");
+      const chFilters = document.getElementById("channelFilters");
+      if (mode === "matches") {
+        matchPanel.classList.remove("hidden");
+        chFilters.classList.add("hidden");
+        searchInput.placeholder = "Tìm đội, giải đấu...";
+        fetchMatches();
+      } else {
+        matchPanel.classList.add("hidden");
+        chFilters.classList.remove("hidden");
+        searchInput.placeholder = "Tìm kênh, nhóm...";
+        loadChannels();
+      }
     }
 
     const SPORT_LABELS = {
@@ -954,7 +1180,10 @@
       document.getElementById("openExternal").href = url;
       fallback.querySelector("div").textContent = "Không phát được trên trình duyệt này.";
 
-      if (window.Hls && Hls.isSupported()) {
+      document.getElementById("playerOverlay").classList.add("open");
+      document.body.classList.add("player-open");
+      const isHls = /\.m3u8(\?|$)/i.test(url) || url.includes("m3u8");
+      if (isHls && window.Hls && Hls.isSupported()) {
         hls = new Hls({ enableWorker: true, lowLatencyMode: true });
         hls.loadSource(url);
         hls.attachMedia(video);
@@ -967,9 +1196,16 @@
             fallback.style.display = "flex";
           }
         });
-      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      } else if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = url;
         video.play().catch(() => {});
+      } else if (!isHls) {
+        // TS / progressive — thử phát trực tiếp, không được thì mở tab
+        video.src = url;
+        video.play().catch(() => {
+          video.style.display = "none";
+          fallback.style.display = "flex";
+        });
       } else {
         video.style.display = "none";
         fallback.style.display = "flex";
@@ -1042,17 +1278,22 @@
     }
 
     document.getElementById("brandHome").addEventListener("click", () => {
+      searchInput.value = "";
+      setMode("matches");
       currentSport = "all";
       currentTab = "live";
-      searchInput.value = "";
       document.querySelectorAll("#sportTabs .tab").forEach(t => {
         t.classList.toggle("active", t.dataset.sport === "all");
       });
       document.querySelectorAll("#tabs .tab").forEach(t => {
         t.classList.toggle("active", t.dataset.tab === "live");
       });
-      updateCounts();
-      render();
+    });
+
+    document.getElementById("modeTabs").addEventListener("click", e => {
+      const btn = e.target.closest(".mode-tab");
+      if (!btn) return;
+      setMode(btn.dataset.mode || "matches");
     });
 
     document.getElementById("tabs").addEventListener("click", e => {
@@ -1073,15 +1314,29 @@
       updateCounts();
       render();
     });
-    document.getElementById("btnRefresh").addEventListener("click", fetchMatches);
+    document.getElementById("channelFilters").addEventListener("click", e => {
+      const btn = e.target.closest(".tab");
+      if (!btn) return;
+      document.querySelectorAll("#channelFilters .tab").forEach(t => t.classList.remove("active"));
+      btn.classList.add("active");
+      currentChSrc = btn.dataset.chsrc || "all";
+      loadChannels();
+    });
+    document.getElementById("btnRefresh").addEventListener("click", () => {
+      if (currentMode === "channels") loadChannels();
+      else fetchMatches();
+    });
     document.getElementById("btnClosePlayer").addEventListener("click", closePlayer);
     document.getElementById("btnFabBack").addEventListener("click", closePlayer);
     document.getElementById("btnBackFromFallback").addEventListener("click", closePlayer);
-    searchInput.addEventListener("input", render);
+    searchInput.addEventListener("input", () => {
+      if (currentMode === "channels") renderChannels();
+      else render();
+    });
     document.addEventListener("keydown", e => {
       if (e.key === "Escape") closePlayer();
     });
-    
+
     history.pushState({ player: false }, "");
     window.addEventListener("popstate", () => {
       const overlay = document.getElementById("playerOverlay");
@@ -1093,9 +1348,13 @@
 
     function startAutoRefresh() {
       if (refreshTimer) clearInterval(refreshTimer);
-      refreshTimer = setInterval(fetchMatches, 60000);
+      refreshTimer = setInterval(() => {
+        if (currentMode === "matches") fetchMatches();
+      }, 60000);
     }
 
+    // channelFilters bắt đầu ẩn
+    document.getElementById("channelFilters").classList.add("hidden");
     fetchMatches();
     startAutoRefresh();
   </script>
