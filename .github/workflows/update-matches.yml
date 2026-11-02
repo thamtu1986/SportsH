@@ -1,0 +1,78 @@
+name: Update matches.json
+
+on:
+  schedule:
+    # Mỗi 10 phút
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch matches from xoiche
+        run: |
+          python3 << 'PY'
+          import json, urllib.request, time
+
+          def get(url):
+              req = urllib.request.Request(url, headers={
+                  "User-Agent": "Mozilla/5.0 SportsH-Bot",
+                  "Accept": "application/json",
+              })
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.load(r)
+
+          base = "https://xoiche.live"
+          url = base + "/api/matches/?ordering=smart&page_size=100&site=xoiche"
+          results = []
+          for _ in range(8):
+              data = get(url)
+              results.extend(data.get("results") or [])
+              nxt = data.get("next")
+              if not nxt:
+                  break
+              url = nxt if nxt.startswith("http") else base + nxt
+              time.sleep(0.2)
+
+          def has_stream(m):
+              def ok(u):
+                  return u and ".m3u8" in str(u)
+              if ok(m.get("primary_stream_url")) or ok(m.get("backup_stream_url")):
+                  return True
+              for c in m.get("commentators") or []:
+                  if ok(c.get("stream_url")) or ok(c.get("flv_stream_url")):
+                      return True
+              for c in m.get("commentator_streams") or []:
+                  if ok(c.get("stream_url")):
+                      return True
+                  if ok((c.get("commentator") or {}).get("stream_url")):
+                      return True
+              return False
+
+          watch = [m for m in results if has_stream(m)]
+          out = {
+              "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "count": len(watch),
+              "results": watch,
+          }
+          with open("matches.json", "w", encoding="utf-8") as f:
+              json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+          print("saved", len(watch), "matches")
+          PY
+
+      - name: Commit matches.json
+        run: |
+          git config user.name "SportsH Bot"
+          git config user.email "bot@sportsh.local"
+          git add matches.json
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "chore: update matches.json"
+            git push
+          fi
