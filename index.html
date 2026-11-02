@@ -301,13 +301,23 @@
       gap: 8px;
       min-width: 0;
     }
-    .team img {
+    .team img, .team .team-avatar {
       width: 42px;
       height: 42px;
       object-fit: contain;
       border-radius: 50%;
       background: var(--bg3);
       border: 1px solid var(--border);
+    }
+    .team .team-avatar {
+      display: grid;
+      place-items: center;
+      font-size: .7rem;
+      font-weight: 800;
+      color: #c5d4e8;
+      background: linear-gradient(135deg, #2a3a4d, #1a222d);
+      user-select: none;
+      text-transform: uppercase;
     }
     .team-name {
       font-size: .86rem;
@@ -520,7 +530,8 @@
         gap: 4px;
         font-size: .8rem;
       }
-      .team img { width: 36px; height: 36px; }
+      .team img, .team .team-avatar { width: 36px; height: 36px; }
+      .team .team-avatar { font-size: .62rem; }
       .score { font-size: 1.2rem; }
       .team-name { font-size: .8rem; }
       .watch-btn { padding: 10px 14px; font-size: .85rem; }
@@ -1245,6 +1256,19 @@
         const logoHome = absUrl(m.home_team?.logo || m.home_team_logo);
         const logoAway = absUrl(m.away_team?.logo || m.away_team_logo);
         const thumb = absUrl(m.thumbnail);
+        const initials = (name) => {
+          const p = String(name || "?").trim().split(/\s+/).filter(Boolean);
+          if (!p.length) return "?";
+          if (p.length === 1) return p[0].slice(0, 2);
+          return (p[0][0] + p[p.length - 1][0]);
+        };
+        const teamBadge = (name, logo) => {
+          if (logo) {
+            return `<img src="${logo}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" />
+              <div class="team-avatar" style="display:none">${initials(name)}</div>`;
+          }
+          return `<div class="team-avatar">${initials(name)}</div>`;
+        };
         const streams = getStreams(m);
         const blvHtml = streams.length
           ? `<div class="blv-row">${streams.slice(0, 3).map(s =>
@@ -1262,7 +1286,7 @@
           </div>
           <div class="teams">
             <div class="team">
-              <img src="${logoHome || thumb}" alt="" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2242%22%3E%3Crect fill=%22%231a222d%22 width=%2242%22 height=%2242%22 rx=%2221%22/%3E%3C/svg%3E'" />
+              ${teamBadge(home, logoHome || (!m._external ? thumb : ""))}
               <div class="team-name">${home}</div>
             </div>
             <div class="score-box">
@@ -1270,7 +1294,7 @@
               <div class="time">${cat === "soon" ? fmtTime(m.start_time) : (m.match_time || "")}</div>
             </div>
             <div class="team">
-              <img src="${logoAway || thumb}" alt="" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2242%22%3E%3Crect fill=%22%231a222d%22 width=%2242%22 height=%2242%22 rx=%2221%22/%3E%3C/svg%3E'" />
+              ${teamBadge(away, logoAway || (!m._external ? thumb : ""))}
               <div class="team-name">${away}</div>
             </div>
           </div>
