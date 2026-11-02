@@ -1288,7 +1288,26 @@
       grid.appendChild(frag);
     }
 
-    function playUrl(url, title) {
+    function parseStreamUrl(raw) {
+      // Dạng IPTV: https://cdn/.../index.m3u8|Referer=https://site/&User-Agent=...
+      let url = String(raw || "").trim();
+      const headers = {};
+      const pipe = url.indexOf("|");
+      if (pipe >= 0) {
+        const headerPart = url.slice(pipe + 1);
+        url = url.slice(0, pipe);
+        headerPart.split("&").forEach((pair) => {
+          const eq = pair.indexOf("=");
+          if (eq < 0) return;
+          const k = decodeURIComponent(pair.slice(0, eq).trim());
+          const v = decodeURIComponent(pair.slice(eq + 1).trim());
+          if (k) headers[k] = v;
+        });
+      }
+      return { url, headers, needsReferer: !!(headers.Referer || headers.referer) };
+    }
+
+    function playUrl(rawUrl, title) {
       const video = document.getElementById("video");
       const fallback = document.getElementById("playerFallback");
       const picker = document.getElementById("blvPicker");
@@ -1298,13 +1317,28 @@
       if (hls) { hls.destroy(); hls = null; }
       video.removeAttribute("src");
       video.load();
+
+      const parsed = parseStreamUrl(rawUrl);
+      const url = parsed.url;
       document.getElementById("playerTitle").textContent = title || "Đang phát";
       document.getElementById("openExternal").style.display = "";
       document.getElementById("openExternal").href = url;
-      fallback.querySelector("div").textContent = "Không phát được trên trình duyệt này.";
-
       document.getElementById("playerOverlay").classList.add("open");
       document.body.classList.add("player-open");
+
+      const showFail = (msg) => {
+        video.style.display = "none";
+        fallback.style.display = "flex";
+        fallback.querySelector("div").textContent = msg;
+      };
+
+      // CDN kiểu PhaLang bắt buộc Referer — trình duyệt không cho JS gắn Referer → 403
+      if (parsed.needsReferer) {
+        showFail("Kênh này chặn xem trên web (cần Referer từ trang gốc). Trình duyệt không gửi được header này nên bị 403. Hãy dùng app IPTV (TiviMate / OTT) hoặc xem trên xoiche khi có BLV.");
+        return;
+      }
+
+      fallback.querySelector("div").textContent = "Không phát được trên trình duyệt này.";
       const isHls = /\.m3u8(\?|$)/i.test(url) || url.includes("m3u8");
       if (isHls && window.Hls && Hls.isSupported()) {
         hls = new Hls({ enableWorker: true, lowLatencyMode: true });
@@ -1315,23 +1349,17 @@
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (data.fatal) {
-            video.style.display = "none";
-            fallback.style.display = "flex";
+            showFail("Stream lỗi hoặc bị CDN chặn (403). Thử BLV/nguồn khác hoặc xem bằng app IPTV.");
           }
         });
       } else if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = url;
-        video.play().catch(() => {});
+        video.play().catch(() => showFail("Không phát được HLS trên trình duyệt này."));
       } else if (!isHls) {
-        // TS / progressive — thử phát trực tiếp, không được thì mở tab
         video.src = url;
-        video.play().catch(() => {
-          video.style.display = "none";
-          fallback.style.display = "flex";
-        });
+        video.play().catch(() => showFail("Định dạng stream không hỗ trợ trên trình duyệt. Dùng app IPTV."));
       } else {
-        video.style.display = "none";
-        fallback.style.display = "flex";
+        showFail("Trình duyệt không hỗ trợ phát stream này.");
       }
     }
 
