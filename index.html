@@ -1302,6 +1302,33 @@
       document.getElementById("cSoon").textContent = soon;
       document.getElementById("cDone").textContent = done;
       document.getElementById("cAll").textContent = all;
+      updateSourceTabs();
+    }
+
+    /** Ẩn tab nguồn không có trận; nếu đang chọn nguồn rỗng → về Mọi nguồn */
+    function updateSourceTabs() {
+      const counts = {};
+      allMatches.forEach(m => {
+        const s = m._source || "xoiche";
+        counts[s] = (counts[s] || 0) + 1;
+      });
+      let activeGone = false;
+      document.querySelectorAll("#sourceTabs .tab").forEach(btn => {
+        const src = btn.dataset.source || "all";
+        if (src === "all") {
+          btn.style.display = "";
+          return;
+        }
+        const n = counts[src] || 0;
+        btn.style.display = n > 0 ? "" : "none";
+        if (n === 0 && btn.classList.contains("active")) activeGone = true;
+      });
+      if (activeGone || (currentSource !== "all" && !(counts[currentSource] > 0))) {
+        currentSource = "all";
+        document.querySelectorAll("#sourceTabs .tab").forEach(t => {
+          t.classList.toggle("active", t.dataset.source === "all");
+        });
+      }
     }
 
     function filtered() {
