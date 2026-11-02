@@ -58,6 +58,17 @@
       border-bottom: 1px solid var(--border);
       padding: 12px 16px;
     }
+    /* Thanh lọc luôn dính dưới header — không bị mất khi cuộn */
+    .filter-bar {
+      position: sticky;
+      top: 58px;
+      z-index: 40;
+      background: rgba(11, 15, 20, 0.96);
+      backdrop-filter: blur(12px);
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+    body.player-open .filter-bar { visibility: hidden; }
     .header-inner {
       max-width: 1200px;
       margin: 0 auto;
@@ -617,30 +628,29 @@
     </div>
   </header>
 
-  <div class="tabs sports" id="sportTabs">
-    <button class="tab sport-tab active" data-sport="all">Tất cả</button>
-  </div>
-
-  <div class="tabs" id="tabs">
-    <button class="tab active" data-tab="live">Đang diễn ra <span class="count" id="cLive">0</span></button>
-    <button class="tab" data-tab="soon">Sắp đá <span class="count" id="cSoon">0</span></button>
-    <button class="tab" data-tab="done">Đã kết thúc <span class="count" id="cDone">0</span></button>
-    <button class="tab" data-tab="all">Tất cả trận <span class="count" id="cAll">0</span></button>
-  </div>
-
-  <div class="tabs" id="sourceTabs">
-    <button class="tab active" data-source="all">Mọi nguồn</button>
-    <button class="tab" data-source="xoiche">Xoiche</button>
-    <button class="tab" data-source="giovang">Giờ Vàng</button>
-    <button class="tab" data-source="cola">Cola</button>
-    <button class="tab" data-source="phalang">PhaLang</button>
-    <button class="tab" data-source="hoiquan">Hội Quán</button>
-    <button class="tab" data-source="thiendinh">Thiên Đình</button>
-    <button class="tab" data-source="vongcam">Vòng Cấm</button>
-  </div>
-
-  <div class="search-wrap">
-    <input class="search" id="search" type="search" placeholder="Tìm đội, giải đấu, BLV..." />
+  <div class="filter-bar" id="filterBar">
+    <div class="tabs sports" id="sportTabs">
+      <button class="tab sport-tab active" data-sport="all">Tất cả</button>
+    </div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="live">Đang diễn ra <span class="count" id="cLive">0</span></button>
+      <button class="tab" data-tab="soon">Sắp đá <span class="count" id="cSoon">0</span></button>
+      <button class="tab" data-tab="done">Đã kết thúc <span class="count" id="cDone">0</span></button>
+      <button class="tab" data-tab="all">Tất cả trận <span class="count" id="cAll">0</span></button>
+    </div>
+    <div class="tabs" id="sourceTabs">
+      <button class="tab active" data-source="all">Mọi nguồn</button>
+      <button class="tab" data-source="xoiche">Xoiche</button>
+      <button class="tab" data-source="giovang">Giờ Vàng</button>
+      <button class="tab" data-source="cola">Cola</button>
+      <button class="tab" data-source="phalang">PhaLang</button>
+      <button class="tab" data-source="hoiquan">Hội Quán</button>
+      <button class="tab" data-source="thiendinh">Thiên Đình</button>
+      <button class="tab" data-source="vongcam">Vòng Cấm</button>
+    </div>
+    <div class="search-wrap">
+      <input class="search" id="search" type="search" placeholder="Tìm đội, giải đấu, BLV..." />
+    </div>
   </div>
 
   <main class="main">
@@ -1461,25 +1471,32 @@
       video.pause();
       video.removeAttribute("src");
       video.load();
+      if (location.hash === "#player") {
+        history.replaceState(null, "", location.pathname + location.search);
+      }
     }
 
-    document.getElementById("brandHome").addEventListener("click", () => {
+    function goHome() {
+      closePlayer();
       searchInput.value = "";
       currentSport = "all";
-      currentTab = "live";
+      currentTab = "all";
       currentSource = "all";
       document.querySelectorAll("#sportTabs .tab").forEach(t => {
         t.classList.toggle("active", t.dataset.sport === "all");
       });
       document.querySelectorAll("#tabs .tab").forEach(t => {
-        t.classList.toggle("active", t.dataset.tab === "live");
+        t.classList.toggle("active", t.dataset.tab === "all");
       });
       document.querySelectorAll("#sourceTabs .tab").forEach(t => {
         t.classList.toggle("active", t.dataset.source === "all");
       });
       updateCounts();
       render();
-    });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    document.getElementById("brandHome").addEventListener("click", goHome);
 
     document.getElementById("tabs").addEventListener("click", e => {
       const btn = e.target.closest(".tab");
@@ -1509,9 +1526,9 @@
       render();
     });
     document.getElementById("btnRefresh").addEventListener("click", fetchMatches);
-    document.getElementById("btnClosePlayer").addEventListener("click", closePlayer);
-    document.getElementById("btnFabBack").addEventListener("click", closePlayer);
-    document.getElementById("btnBackFromFallback").addEventListener("click", closePlayer);
+    document.getElementById("btnClosePlayer").addEventListener("click", goHome);
+    document.getElementById("btnFabBack").addEventListener("click", goHome);
+    document.getElementById("btnBackFromFallback").addEventListener("click", goHome);
     searchInput.addEventListener("input", render);
     document.addEventListener("keydown", e => {
       if (e.key === "Escape") closePlayer();
