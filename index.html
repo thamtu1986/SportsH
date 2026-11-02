@@ -634,6 +634,9 @@
     <button class="tab" data-source="giovang">Giờ Vàng</button>
     <button class="tab" data-source="cola">Cola</button>
     <button class="tab" data-source="phalang">PhaLang</button>
+    <button class="tab" data-source="hoiquan">Hội Quán</button>
+    <button class="tab" data-source="thiendinh">Thiên Đình</button>
+    <button class="tab" data-source="vongcam">Vòng Cấm</button>
   </div>
 
   <div class="search-wrap">
@@ -1033,7 +1036,11 @@
         if (parts[2]) blv = parts[2];
       }
       const src = (ch.source || "other").toLowerCase();
-      const srcLabel = src === "giovang" ? "Giờ Vàng" : src === "cola" ? "Cola" : src === "phalang" ? "PhaLang" : src;
+      const SRC_LABELS = {
+        giovang: "Giờ Vàng", cola: "Cola", phalang: "PhaLang",
+        hoiquan: "Hội Quán", thiendinh: "Thiên Đình", vongcam: "Vòng Cấm", xoiche: "Xoiche"
+      };
+      const srcLabel = SRC_LABELS[src] || src;
       // Ước lượng trạng thái theo giờ trong tên (đơn giản: coi là sắp/live)
       let status = "scheduled";
       const now = new Date();
@@ -1250,7 +1257,11 @@
         let league = m.tournament?.name || m.tournament_name || m.sport?.name || m.sport_name || "Thể thao";
         const src = m._source || "xoiche";
         if (src && src !== "xoiche") {
-          const srcLabel = src === "giovang" ? "Giờ Vàng" : src === "cola" ? "Cola" : src === "phalang" ? "PhaLang" : src;
+          const SRC_LABELS2 = {
+            giovang: "Giờ Vàng", cola: "Cola", phalang: "PhaLang",
+            hoiquan: "Hội Quán", thiendinh: "Thiên Đình", vongcam: "Vòng Cấm", xoiche: "Xoiche"
+          };
+          const srcLabel = SRC_LABELS2[src] || src;
           league = srcLabel + (league ? " · " + league : "");
         }
         const logoHome = absUrl(m.home_team?.logo || m.home_team_logo);
