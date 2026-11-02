@@ -64,20 +64,34 @@ jobs:
           print("saved", len(watch), "matches")
           PY
 
-      - name: Fetch channels from bongda-1
+      - name: Fetch channels (M3U + Hội Quán + Thiên Đình)
         run: |
           python3 << 'PY'
-          import json, urllib.request, time, re
+          import json, urllib.request, time, re, ssl
+          from datetime import datetime
+
+          CTX = ssl.create_default_context()
+          try:
+              CTX.check_hostname = False
+              CTX.verify_mode = ssl.CERT_NONE
+          except Exception:
+              pass
+
+          def get_bytes(url, timeout=45):
+              req = urllib.request.Request(url, headers={
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SportsH-Bot",
+                  "Accept": "application/json, text/plain, */*",
+              })
+              with urllib.request.urlopen(req, timeout=timeout, context=CTX) as r:
+                  return r.read()
 
           def get_text(url):
-              req = urllib.request.Request(url, headers={
-                  "User-Agent": "Mozilla/5.0 SportsH-Bot",
-                  "Accept": "*/*",
-              })
-              with urllib.request.urlopen(req, timeout=60) as r:
-                  return r.read().decode("utf-8", "replace")
+              return get_bytes(url).decode("utf-8", "replace")
 
-          def parse(text, source):
+          def get_json(url):
+              return json.loads(get_bytes(url).decode("utf-8", "replace"))
+
+          def parse_m3u(text, source):
               out = []
               cur = None
               for raw in text.splitlines():
@@ -104,24 +118,155 @@ jobs:
                       cur = None
               return out
 
-          sources = {
+          def pick_stream_url(obj):
+              """Tìm URL m3u8 trong object / list lồng nhau."""
+              if not obj:
+                  return None
+              candidates = []
+              def walk(x, depth=0):
+                  if depth > 6 or x is None:
+                      return
+                  if isinstance(x, str):
+                      if x.startswith("http") and (".m3u8" in x or "m3u8" in x):
+                          candidates.append(x)
+                      return
+                  if isinstance(x, dict):
+                      for k in ("sourceUrl", "stream_url", "streamUrl", "playStreamAddress2",
+                                "playStreamAddress", "url", "link", "streamSourceFhd",
+                                "streamSource", "flv_stream_url", "primary_stream_url"):
+                          v = x.get(k)
+                          if isinstance(v, str) and v.startswith("http"):
+                              candidates.append(v)
+                      for v in x.values():
+                          walk(v, depth + 1)
+                  elif isinstance(x, list):
+                      for i in x:
+                          walk(i, depth + 1)
+              walk(obj)
+              # Ưu tiên m3u8
+              for c in candidates:
+                  if ".m3u8" in c:
+                      return c
+              return candidates[0] if candidates else None
+
+          def parse_fixture_api(data, source, label):
+              out = []
+              items = []
+              if isinstance(data, list):
+                  items = data
+              elif isinstance(data, dict):
+                  for k in ("data", "results", "fixtures", "matches", "items"):
+                      if k in data and data[k] is not None:
+                          v = data[k]
+                          if isinstance(v, list):
+                              items = v
+                          elif isinstance(v, dict):
+                              items = list(v.values())
+                          break
+              for item in items:
+                  if not isinstance(item, dict):
+                      continue
+                  home = (item.get("homeTeam") or item.get("home_team") or {})
+                  away = (item.get("awayTeam") or item.get("away_team") or {})
+                  if isinstance(home, str):
+                      home_name = home
+                  else:
+                      home_name = home.get("name") or home.get("teamName") or item.get("home_name") or "?"
+                  if isinstance(away, str):
+                      away_name = away
+                  else:
+                      away_name = away.get("name") or away.get("teamName") or item.get("away_name") or "?"
+                  title = item.get("title") or item.get("name") or f"{home_name} VS {away_name}"
+                  league = ""
+                  for lk in ("league", "tournament", "competition"):
+                      lv = item.get(lk)
+                      if isinstance(lv, dict):
+                          league = lv.get("name") or ""
+                      elif isinstance(lv, str):
+                          league = lv
+                      if league:
+                          break
+                  # thời gian
+                  ts = item.get("matchTime") or item.get("start_time") or item.get("kickoff") or item.get("startTime")
+                  time_label = ""
+                  if isinstance(ts, (int, float)) and ts > 1e9:
+                      try:
+                          time_label = datetime.fromtimestamp(ts if ts < 1e12 else ts/1000).strftime("%H:%M - %d/%m")
+                      except Exception:
+                          pass
+                  elif isinstance(ts, str) and ts:
+                      time_label = ts[:16]
+                  blv = ""
+                  streams_block = (
+                      item.get("streams")
+                      or item.get("commentators")
+                      or item.get("anchorAppointmentVoList")
+                      or item.get("commentator")
+                      or item
+                  )
+                  if isinstance(streams_block, list) and streams_block:
+                      first = streams_block[0]
+                      if isinstance(first, dict):
+                          blv = first.get("name") or first.get("commentatorName") or first.get("nickName") or ""
+                  url = pick_stream_url(streams_block) or pick_stream_url(item)
+                  if not url:
+                      continue
+                  name = title
+                  if time_label:
+                      name = f"{time_label} | {title}"
+                  if blv:
+                      name = f"{name} | {blv}"
+                  logo = ""
+                  if isinstance(home, dict):
+                      logo = home.get("logoUrl") or home.get("logo") or ""
+                  out.append({
+                      "name": name,
+                      "group": league or label,
+                      "logo": logo,
+                      "source": source,
+                      "url": url,
+                  })
+              return out
+
+          all_ch = []
+          seen = set()
+
+          def add_items(items, tag):
+              n = 0
+              for ch in items:
+                  u = ch.get("url") or ""
+                  if not u or u in seen:
+                      continue
+                  seen.add(u)
+                  all_ch.append(ch)
+                  n += 1
+              print(tag, n)
+
+          # 1) M3U từ bongda-1
+          m3u_sources = {
               "giovang": "https://bongda-1.onrender.com/giovang.m3u",
               "cola": "https://bongda-1.onrender.com/cola.m3u",
               "phalang": "https://bongda-1.onrender.com/phalang.m3u",
           }
-          all_ch = []
-          seen = set()
-          for k, url in sources.items():
+          for k, url in m3u_sources.items():
               try:
-                  items = parse(get_text(url), k)
-                  print(k, len(items))
-                  for ch in items:
-                      if ch["url"] in seen:
-                          continue
-                      seen.add(ch["url"])
-                      all_ch.append(ch)
+                  add_items(parse_m3u(get_text(url), k), k)
               except Exception as e:
                   print("ERR", k, e)
+
+          # 2) API Hội Quán / Thiên Đình / Vòng Cấm
+          json_sources = [
+              ("hoiquan", "https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished", "Hội Quán"),
+              ("thiendinh", "https://sv.thiendinhtv.xyz/api/v1/external/fixtures/unfinished", "Thiên Đình"),
+              ("vongcam", "https://sv.bugiotv.xyz/internal/api/matches", "Vòng Cấm"),
+          ]
+          for key, url, label in json_sources:
+              try:
+                  data = get_json(url)
+                  items = parse_fixture_api(data, key, label)
+                  add_items(items, key)
+              except Exception as e:
+                  print("ERR", key, e)
 
           out = {
               "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
