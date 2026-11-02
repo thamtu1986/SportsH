@@ -737,16 +737,24 @@
 
     async function fetchText(url) {
       let lastErr;
-      for (let i = 0; i < PROXIES.length; i++) {
-        const idx = (useProxyIndex + i) % PROXIES.length;
+      // Trên GitHub Pages ưu tiên proxy trước (tránh CORS)
+      const order = location.hostname.includes("github.io")
+        ? [1, 2, 3, 0]
+        : [0, 1, 2, 3];
+      for (const idx of order) {
         const reqUrl = PROXIES[idx](url);
         try {
           const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 20000);
+          const timer = setTimeout(() => ctrl.abort(), 25000);
           const res = await fetch(reqUrl, { signal: ctrl.signal, cache: "no-store" });
           clearTimeout(timer);
           if (!res.ok) throw new Error("HTTP " + res.status);
           const text = await res.text();
+          if (!text || text.length < 20) throw new Error("Empty response");
+          // Proxy đôi khi trả HTML lỗi
+          if (/^\s*</.test(text) && !text.includes("#EXTINF")) {
+            throw new Error("HTML instead of M3U");
+          }
           useProxyIndex = idx;
           return text;
         } catch (e) {
@@ -776,7 +784,7 @@
           cur = { name, group, logo, source: sourceTag, url: "" };
         } else if (!line.startsWith("#") && cur) {
           cur.url = line;
-          if (cur.url) list.push(cur);
+          if (cur.url && /^https?:\/\//i.test(cur.url)) list.push(cur);
           cur = null;
         }
       }
@@ -786,24 +794,31 @@
     async function loadChannels() {
       statusText.textContent = "Đang tải kênh live...";
       state.style.display = "block";
-      state.innerHTML = `<div class="spinner"></div>Đang tải playlist...`;
+      state.innerHTML = `<div class="spinner"></div>Đang tải playlist từ bongda-1...<br/><span style="font-size:.75rem;opacity:.7">Lần đầu server có thể mất 30–60 giây</span>`;
       grid.innerHTML = "";
+      allChannels = [];
       try {
         let keys = [];
         if (currentChSrc === "all") keys = ["giovang", "cola", "phalang"];
         else if (currentChSrc === "live") keys = ["live"];
         else keys = [currentChSrc];
 
-        const chunks = await Promise.all(keys.map(async (k) => {
+        const errors = [];
+        const chunks = [];
+        for (const k of keys) {
           try {
+            statusText.textContent = "Đang tải " + k + "...";
             const text = await fetchText(CHANNEL_SOURCES[k]);
-            return parseM3U(text, k);
+            const parsed = parseM3U(text, k);
+            chunks.push(parsed);
+            if (!parsed.length) errors.push(k + ": không có kênh trong file");
           } catch (e) {
             console.error("channel source", k, e);
-            return [];
+            errors.push(k + ": " + (e.message || "lỗi"));
+            chunks.push([]);
           }
-        }));
-        // gộp + bỏ trùng theo url
+        }
+
         const seen = new Set();
         allChannels = [];
         chunks.flat().forEach((ch) => {
@@ -814,11 +829,21 @@
         updatedAt.textContent = "Cập nhật " + new Date().toLocaleTimeString("vi-VN") + " · M3U";
         statusText.textContent = allChannels.length + " kênh";
         liveDot.style.display = allChannels.length ? "inline-block" : "none";
+
+        if (!allChannels.length) {
+          state.style.display = "block";
+          state.innerHTML = `Không tải được kênh.<br/>
+            1) Mở <a href="https://bongda-1.onrender.com/" target="_blank" rel="noopener" style="color:var(--accent)">bongda-1.onrender.com</a> để đánh thức server<br/>
+            2) Quay lại bấm ⟳<br/>
+            <span style="font-size:.75rem;opacity:.7">${errors.join(" · ") || ""}</span>`;
+          return;
+        }
         renderChannels();
       } catch (e) {
         console.error(e);
         statusText.textContent = "Lỗi tải kênh";
-        state.innerHTML = `Không tải được playlist.<br/>Server bongda-1 có thể đang ngủ — bấm ⟳ thử lại.<br/><span style="font-size:.75rem;opacity:.7">${e.message || ""}</span>`;
+        state.style.display = "block";
+        state.innerHTML = `Không tải được playlist.<br/>Bấm ⟳ hoặc mở bongda-1 để đánh thức server.<br/><span style="font-size:.75rem;opacity:.7">${e.message || ""}</span>`;
       }
     }
 
@@ -835,7 +860,9 @@
       grid.innerHTML = "";
       if (!list.length) {
         state.style.display = "block";
-        state.innerHTML = allChannels.length ? "Không có kênh phù hợp." : `<div class="spinner"></div>Đang tải...`;
+        state.innerHTML = allChannels.length
+          ? "Không có kênh phù hợp với từ khóa tìm kiếm."
+          : "Chưa có kênh. Bấm ⟳ để tải lại.";
         return;
       }
       state.style.display = "none";
