@@ -791,59 +791,79 @@
       return list;
     }
 
+    async function loadChannelsLocal() {
+      try {
+        const res = await fetch("channels.json?t=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data && Array.isArray(data.channels)) return data.channels;
+        if (Array.isArray(data)) return data;
+      } catch (_) {}
+      return null;
+    }
+
     async function loadChannels() {
       statusText.textContent = "Đang tải kênh live...";
       state.style.display = "block";
-      state.innerHTML = `<div class="spinner"></div>Đang tải playlist từ bongda-1...<br/><span style="font-size:.75rem;opacity:.7">Lần đầu server có thể mất 30–60 giây</span>`;
+      state.innerHTML = `<div class="spinner"></div>Đang tải kênh...`;
       grid.innerHTML = "";
       allChannels = [];
       try {
-        let keys = [];
-        if (currentChSrc === "all") keys = ["giovang", "cola", "phalang"];
-        else if (currentChSrc === "live") keys = ["live"];
-        else keys = [currentChSrc];
+        // Ưu tiên channels.json cùng repo (tránh NetworkError / CORS trên GitHub Pages)
+        let list = await loadChannelsLocal();
+        let from = "cache";
 
-        const errors = [];
-        const chunks = [];
-        for (const k of keys) {
-          try {
-            statusText.textContent = "Đang tải " + k + "...";
-            const text = await fetchText(CHANNEL_SOURCES[k]);
-            const parsed = parseM3U(text, k);
-            chunks.push(parsed);
-            if (!parsed.length) errors.push(k + ": không có kênh trong file");
-          } catch (e) {
-            console.error("channel source", k, e);
-            errors.push(k + ": " + (e.message || "lỗi"));
-            chunks.push([]);
+        if (list && list.length && currentChSrc !== "all" && currentChSrc !== "live") {
+          list = list.filter((ch) => (ch.source || "") === currentChSrc);
+        }
+
+        // Thử live M3U nếu chưa có cache
+        if (!list || !list.length) {
+          const keys = currentChSrc === "live" ? ["live"]
+            : currentChSrc === "all" ? ["giovang", "cola", "phalang"]
+            : [currentChSrc];
+          const errors = [];
+          const chunks = [];
+          for (const k of keys) {
+            try {
+              statusText.textContent = "Đang tải " + k + "...";
+              const text = await fetchText(CHANNEL_SOURCES[k]);
+              chunks.push(parseM3U(text, k));
+            } catch (e) {
+              errors.push(k + ": " + (e.message || "lỗi"));
+              chunks.push([]);
+            }
+          }
+          const seen = new Set();
+          const liveList = [];
+          chunks.flat().forEach((ch) => {
+            if (!ch.url || seen.has(ch.url)) return;
+            seen.add(ch.url);
+            liveList.push(ch);
+          });
+          if (liveList.length) {
+            list = liveList;
+            from = "live";
+          } else {
+            state.style.display = "block";
+            statusText.textContent = "0 kênh";
+            state.innerHTML = `Không tải được kênh từ trình duyệt.<br/>
+              Upload file <b>channels.json</b> lên GitHub (có trong zip mới).<br/>
+              <span style="font-size:.75rem;opacity:.7">${errors.join(" · ")}</span>`;
+            return;
           }
         }
 
-        const seen = new Set();
-        allChannels = [];
-        chunks.flat().forEach((ch) => {
-          if (!ch.url || seen.has(ch.url)) return;
-          seen.add(ch.url);
-          allChannels.push(ch);
-        });
-        updatedAt.textContent = "Cập nhật " + new Date().toLocaleTimeString("vi-VN") + " · M3U";
+        allChannels = list || [];
+        updatedAt.textContent = "Cập nhật " + new Date().toLocaleTimeString("vi-VN") + " · " + from;
         statusText.textContent = allChannels.length + " kênh";
         liveDot.style.display = allChannels.length ? "inline-block" : "none";
-
-        if (!allChannels.length) {
-          state.style.display = "block";
-          state.innerHTML = `Không tải được kênh.<br/>
-            1) Mở <a href="https://bongda-1.onrender.com/" target="_blank" rel="noopener" style="color:var(--accent)">bongda-1.onrender.com</a> để đánh thức server<br/>
-            2) Quay lại bấm ⟳<br/>
-            <span style="font-size:.75rem;opacity:.7">${errors.join(" · ") || ""}</span>`;
-          return;
-        }
         renderChannels();
       } catch (e) {
         console.error(e);
         statusText.textContent = "Lỗi tải kênh";
         state.style.display = "block";
-        state.innerHTML = `Không tải được playlist.<br/>Bấm ⟳ hoặc mở bongda-1 để đánh thức server.<br/><span style="font-size:.75rem;opacity:.7">${e.message || ""}</span>`;
+        state.innerHTML = `Không tải được kênh.<br/><span style="font-size:.75rem;opacity:.7">${e.message || ""}</span>`;
       }
     }
 
