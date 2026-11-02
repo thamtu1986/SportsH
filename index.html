@@ -634,7 +634,7 @@
     </div>
     <div class="tabs" id="tabs">
       <button class="tab active" data-tab="live">Đang diễn ra <span class="count" id="cLive">0</span></button>
-      <button class="tab" data-tab="soon">Sắp đá <span class="count" id="cSoon">0</span></button>
+      <button class="tab" data-tab="soon">Sắp diễn ra <span class="count" id="cSoon">0</span></button>
       <button class="tab" data-tab="done">Đã kết thúc <span class="count" id="cDone">0</span></button>
       <button class="tab" data-tab="all">Tất cả trận <span class="count" id="cAll">0</span></button>
     </div>
@@ -1303,7 +1303,7 @@
         card.innerHTML = `
           <div class="card-top">
             <div class="league" title="${league}">${league}</div>
-            <div class="badge ${cat}">${cat === "live" ? "LIVE" : cat === "soon" ? "SẮP ĐÁ" : "HẾT"}</div>
+            <div class="badge ${cat}">${cat === "live" ? "LIVE" : cat === "soon" ? "SẮP TỚI" : "HẾT"}</div>
           </div>
           <div class="teams">
             <div class="team">
@@ -1476,6 +1476,18 @@
       }
     }
 
+    /** Thoát xem trận → về tab Đang diễn ra */
+    function backFromPlayer() {
+      closePlayer();
+      currentTab = "live";
+      document.querySelectorAll("#tabs .tab").forEach(t => {
+        t.classList.toggle("active", t.dataset.tab === "live");
+      });
+      updateCounts();
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
     function goHome() {
       closePlayer();
       searchInput.value = "";
@@ -1526,9 +1538,9 @@
       render();
     });
     document.getElementById("btnRefresh").addEventListener("click", fetchMatches);
-    document.getElementById("btnClosePlayer").addEventListener("click", goHome);
-    document.getElementById("btnFabBack").addEventListener("click", goHome);
-    document.getElementById("btnBackFromFallback").addEventListener("click", goHome);
+    document.getElementById("btnClosePlayer").addEventListener("click", backFromPlayer);
+    document.getElementById("btnFabBack").addEventListener("click", backFromPlayer);
+    document.getElementById("btnBackFromFallback").addEventListener("click", backFromPlayer);
     searchInput.addEventListener("input", render);
     document.addEventListener("keydown", e => {
       if (e.key === "Escape") closePlayer();
