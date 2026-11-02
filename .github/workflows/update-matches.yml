@@ -26,6 +26,7 @@ jobs:
               with urllib.request.urlopen(req, timeout=30) as r:
                   return json.load(r)
 
+          from urllib.parse import urlparse
           base = "https://xoiche.live"
           url = base + "/api/matches/?ordering=smart&page_size=100&site=xoiche"
           results = []
@@ -35,7 +36,16 @@ jobs:
               nxt = data.get("next")
               if not nxt:
                   break
-              url = nxt if nxt.startswith("http") else base + nxt
+              # Chỉ theo pagination trên xoiche.live (HTTPS)
+              cand = nxt if str(nxt).startswith("http") else base + str(nxt)
+              try:
+                  p = urlparse(cand)
+                  if p.scheme != "https" or p.hostname not in ("xoiche.live", "www.xoiche.live"):
+                      print("skip next host", p.hostname)
+                      break
+                  url = cand
+              except Exception:
+                  break
               time.sleep(0.2)
 
           def has_stream(m):
@@ -69,15 +79,30 @@ jobs:
           python3 << 'PY'
           import json, urllib.request, time, re, ssl
           from datetime import datetime
+          from urllib.parse import urlparse
 
+          # Xác minh TLS đầy đủ (không tắt CERT)
           CTX = ssl.create_default_context()
-          try:
-              CTX.check_hostname = False
-              CTX.verify_mode = ssl.CERT_NONE
-          except Exception:
-              pass
+
+          ALLOWED_HOST_SUFFIXES = (
+              "onrender.com", "cltvlv.com", "keonhacaitp.one",
+              "hoiquantv.xyz", "thiendinhtv.xyz", "bugiotv.xyz",
+              "plapi202624081158.com", "xoiche.live",
+          )
+
+          def host_allowed(url):
+              try:
+                  p = urlparse(url)
+                  if p.scheme != "https" or not p.hostname:
+                      return False
+                  h = p.hostname.lower()
+                  return any(h == s or h.endswith("." + s) for s in ALLOWED_HOST_SUFFIXES)
+              except Exception:
+                  return False
 
           def get_bytes(url, timeout=45):
+              if not host_allowed(url):
+                  raise ValueError("host not allowed: " + url[:80])
               req = urllib.request.Request(url, headers={
                   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SportsH-Bot",
                   "Accept": "application/json, text/plain, */*",
