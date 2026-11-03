@@ -844,9 +844,14 @@
     async function fetchLocalChannels() {
       const data = await fetchSameOriginJson(LOCAL_CHANNELS);
       if (!data) return [];
-      if (Array.isArray(data.channels)) return data.channels;
-      if (Array.isArray(data)) return data;
-      return [];
+      // Ưu tiên streams (schema mới); fallback channels / mảng thuần
+      const list = data.streams || data.channels || data;
+      if (!Array.isArray(list)) return [];
+      // Chỉ giữ mục có type stream hoặc URL .m3u8 hợp lệ (bỏ event_link)
+      return list.filter((ch) => {
+        if (ch && ch.type === "event_link") return false;
+        return !!validateStreamUrl(ch && ch.url);
+      });
     }
 
     const SPORT_LABELS = {
@@ -898,15 +903,16 @@
       } catch (_) {}
       return "";
     }
-    /** Stream phát: chỉ HTTPS + host công khai + có .m3u8 (tách khỏi safeUrl) */
+    /** Stream phát: HTTPS + host công khai + pathname kết thúc .m3u8 */
     function validateStreamUrl(u) {
       const s = String(u || "").trim();
-      if (!s || !s.toLowerCase().includes(".m3u8")) return "";
+      if (!s) return "";
       try {
         const x = new URL(s);
         if (x.protocol !== "https:") return "";
-        if (!x.hostname) return "";
-        if (x.username || x.password) return "";
+        if (!x.hostname || x.username || x.password) return "";
+        const path = (x.pathname || "").toLowerCase();
+        if (!path.endsWith(".m3u8")) return "";
         const h = x.hostname.toLowerCase();
         if (
           h === "localhost" || h === "127.0.0.1" || h === "::1" ||
