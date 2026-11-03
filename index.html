@@ -759,7 +759,7 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js" integrity="sha384-9v3HcdYrO3D+OPDTjZ40RXocgE4GtXVCd3/mCS62JsM93JXgI1afJVuwjFvsu6ni" crossorigin="anonymous"></script>
   <script>
     const API = "https://xoiche.live/api/matches/?ordering=smart&page_size=100&site=xoiche";
     const BASE = "https://xoiche.live";
@@ -953,7 +953,12 @@
         console.error(e);
         statusText.textContent = "Lỗi tải kênh";
         state.style.display = "block";
-        state.innerHTML = `Không tải được kênh.<br/><span style="font-size:.75rem;opacity:.7">${e.message || ""}</span>`;
+        state.textContent = "";
+        state.appendChild(document.createTextNode("Không tải được kênh. "));
+        const det = document.createElement("span");
+        det.style.cssText = "font-size:.75rem;opacity:.7";
+        det.textContent = e.message || "";
+        state.appendChild(det);
       }
     }
 
@@ -981,12 +986,12 @@
         const card = document.createElement("div");
         card.className = "card channel-card";
         card.tabIndex = 0;
-        const logo = ch.logo || "";
+        const logo = safeUrl(ch.logo || "");
         card.innerHTML = `
-          <img class="channel-logo" src="${logo}" alt="" onerror="this.style.display='none'" />
+          <img class="channel-logo" src="${esc(logo)}" alt="" onerror="this.style.display='none'" />
           <div class="channel-meta">
-            <div class="channel-name">${ch.name}</div>
-            <div class="channel-group">${ch.group || ch.source || "Live"}</div>
+            <div class="channel-name">${esc(ch.name)}</div>
+            <div class="channel-group">${esc(ch.group || ch.source || "Live")}</div>
           </div>
           <button class="watch-btn" type="button">Xem</button>
         `;
@@ -1046,6 +1051,26 @@
       return BASE + u;
     }
 
+    /** Chống XSS: escape text trước khi đưa vào HTML */
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+    /** Chỉ chấp nhận http(s) cho src/href */
+    function safeUrl(u) {
+      const s = String(u || "").trim();
+      if (!s) return "";
+      try {
+        const x = new URL(s, location.href);
+        if (x.protocol === "http:" || x.protocol === "https:") return x.href;
+      } catch (_) {}
+      return "";
+    }
+
     function fmtTime(iso) {
       if (!iso) return "";
       try {
@@ -1058,9 +1083,21 @@
     }
 
     function classify(m) {
-      const s = (m.status || "").toLowerCase();
+      const s = String(m.status || "").toLowerCase();
       if (s === "live" || s === "inplay" || s === "1h" || s === "2h" || s === "ht" || s === "half_time" || s === "halftime") return "live";
       if (s === "finished" || s === "ft" || s === "after_pen" || s === "after_et" || s === "postponed" || s === "cancelled") return "done";
+      // Fallback theo start_time (khi status = scheduled nhưng đang trong khung giờ thi đấu)
+      const t = m.start_time || m.kickoff;
+      if (t) {
+        try {
+          const start = new Date(t);
+          if (!isNaN(start.getTime())) {
+            const diffMin = (Date.now() - start.getTime()) / 60000;
+            if (diffMin >= -15 && diffMin <= 150) return "live";
+            if (diffMin > 150) return "done";
+          }
+        } catch (_) {}
+      }
       return "soon";
     }
 
@@ -1126,19 +1163,31 @@
         hoiquan: "Hội Quán", thiendinh: "Thiên Đình", vongcam: "Vòng Cấm", xoiche: "Xoiche"
       };
       const srcLabel = SRC_LABELS[src] || src;
-      // Ước lượng trạng thái theo giờ trong tên (đơn giản: coi là sắp/live)
+      // Ước lượng trạng thái theo GIỜ + NGÀY trong tên (vd: "15:30 - 04/11")
       let status = "scheduled";
       const now = new Date();
-      // Nếu có giờ HH:MM ở đầu và gần hiện tại → live
       const tm = timeLabel.match(/(\d{1,2}):(\d{2})/);
+      const dm = timeLabel.match(/(\d{1,2})\/(\d{1,2})/);
       if (tm) {
         const hh = parseInt(tm[1], 10);
         const mm = parseInt(tm[2], 10);
         const start = new Date(now);
-        start.setHours(hh, mm, 0, 0);
+        if (dm) {
+          const day = parseInt(dm[1], 10);
+          const month = parseInt(dm[2], 10) - 1; // 0-indexed
+          let year = now.getFullYear();
+          start.setFullYear(year, month, day);
+          start.setHours(hh, mm, 0, 0);
+          // Nếu lệch > 180 ngày so với hiện tại, chỉnh năm gần nhất
+          if (start - now > 180 * 864e5) start.setFullYear(year - 1);
+          if (now - start > 180 * 864e5) start.setFullYear(year + 1);
+        } else {
+          start.setHours(hh, mm, 0, 0);
+        }
         const diffMin = (now - start) / 60000;
-        if (diffMin >= -15 && diffMin <= 150) status = "live";
+        if (diffMin >= -20 && diffMin <= 150) status = "live";
         else if (diffMin > 150) status = "finished";
+        else status = "scheduled"; // ngày/giờ trong tương lai
       }
       const low = name.toLowerCase();
       let sport_slug = "football";
@@ -1175,29 +1224,43 @@
         let results = [];
         let source = "";
 
-        // 1) xoiche — matches.json hoặc API
+        // 1) xoiche — ưu tiên API nếu cache cũ (>15 phút) hoặc thiếu trận live
         const local = await fetchLocalMatches();
-        if (local && local.results && local.results.length) {
+        let cacheAgeMin = 9999;
+        if (local && local.updated_at) {
+          cacheAgeMin = (Date.now() - new Date(local.updated_at).getTime()) / 60000;
+        }
+        let usedApi = false;
+        try {
+          if (!local || !local.results || !local.results.length || cacheAgeMin > 15) {
+            let url = API;
+            let safetyLoop = 0;
+            while (url && safetyLoop < 10) {
+              const data = await fetchJson(url);
+              if (data && data.results) results = results.concat(data.results);
+              else if (Array.isArray(data)) { results = results.concat(data); break; }
+              if (data && data.next) url = data.next.startsWith("http") ? data.next : (BASE + data.next);
+              else break;
+              safetyLoop++;
+            }
+            if (results.length) {
+              results = results.map((m) => ({ ...m, _source: "xoiche" }));
+              source = "api";
+              usedApi = true;
+            }
+          }
+        } catch (apiErr) {
+          console.warn("xoiche API", apiErr);
+        }
+        if (!usedApi && local && local.results && local.results.length) {
           results = local.results.map((m) => ({ ...m, _source: "xoiche" }));
           source = "cache";
-        } else {
-          let url = API;
-          let safetyLoop = 0;
-          while (url && safetyLoop < 10) {
-            const data = await fetchJson(url);
-            if (data && data.results) results = results.concat(data.results);
-            else if (Array.isArray(data)) { results = results.concat(data); break; }
-            if (data && data.next) url = data.next.startsWith("http") ? data.next : (BASE + data.next);
-            else break;
-            safetyLoop++;
-          }
-          results = results.map((m) => ({ ...m, _source: "xoiche" }));
-          source = "api";
         }
 
-        const watchable = results.filter(hasWatchableStream);
-        const liveSoon = watchable.filter(m => classify(m) !== "done");
-        const done = watchable.filter(m => classify(m) === "done").slice(0, 30);
+        // Giữ trận live/sắp diễn ra kể cả chưa có m3u8 (vẫn hiện trên danh sách)
+        const notDone = results.filter(m => classify(m) !== "done");
+        const liveSoon = notDone.filter(m => classify(m) === "live" || classify(m) === "soon" || hasWatchableStream(m));
+        const done = results.filter(m => classify(m) === "done" && hasWatchableStream(m)).slice(0, 30);
 
         // 2) Gộp kênh live (Giờ Vàng / Cola / PhaLang) từ channels.json
         let extra = [];
@@ -1227,7 +1290,15 @@
         console.error(e);
         statusText.textContent = "Lỗi tải dữ liệu";
         state.style.display = "block";
-        state.innerHTML = `<div class="spinner"></div>Không tải được danh sách trận.<br/>Bấm nút ⟳ góc trên để thử lại.<br/><span style="font-size:.75rem;opacity:.7">${(e && e.message) ? e.message : ""}</span>`;
+        state.textContent = "";
+        const sp = document.createElement("div");
+        sp.className = "spinner";
+        state.appendChild(sp);
+        state.appendChild(document.createTextNode("Không tải được danh sách trận. Bấm nút ⟳ góc trên để thử lại. "));
+        const det = document.createElement("span");
+        det.style.cssText = "font-size:.75rem;opacity:.7;display:block;margin-top:6px";
+        det.textContent = (e && e.message) ? e.message : "";
+        state.appendChild(det);
         grid.innerHTML = "";
       }
     }
@@ -1244,7 +1315,11 @@
       return null;
     }
 
-    // ĐÃ SỬA: Hàm chuẩn hóa sportSlug để nhận diện chính xác môn bóng chuyền từ API
+    // Chuẩn hóa sport slug — chỉ cho phép [a-z0-9_-] khi đưa vào HTML attribute
+    function safeSportSlug(value) {
+      const s = String(value || "").toLowerCase().trim();
+      return /^[a-z0-9_-]{1,32}$/.test(s) ? s : "other";
+    }
     function sportSlug(m) {
       const raw = (m.sport_slug || m.sport?.slug || m.sport_name || m.sport?.name || "other").toLowerCase();
       if (raw.includes("chuyền") || raw.includes("volleyball")) return "volleyball";
@@ -1254,7 +1329,7 @@
       if (raw.includes("cầu lông") || raw.includes("badminton")) return "badminton";
       if (raw.includes("bóng bàn") || raw.includes("table tennis")) return "tabletennis";
       if (raw.includes("esports") || raw.includes("game")) return "esports";
-      return raw;
+      return safeSportSlug(raw);
     }
 
     function updateSportTabs() {
@@ -1266,22 +1341,30 @@
         if (classify(m) === "live") liveBySport[s] = (liveBySport[s] || 0) + 1;
       });
       const fixed = ["football","volleyball","basketball","tennis","badminton","tabletennis","esports"];
-      // Chỉ hiện môn đang có trận xem được
       const slugs = fixed.filter(s => counts[s]).concat(
-        Object.keys(counts).filter(s => !fixed.includes(s))
+        Object.keys(counts).filter(s => !fixed.includes(s) && /^[a-z0-9_-]{1,32}$/.test(s))
       );
-      // Nếu đang chọn môn không còn trận → về Tất cả
       if (currentSport !== "all" && !counts[currentSport]) currentSport = "all";
       const wrap = document.getElementById("sportTabs");
-      let html = `<button class="tab sport-tab ${currentSport === "all" ? "active" : ""}" data-sport="all">Tất cả</button>`;
+      wrap.textContent = "";
+      const mkBtn = (sport, label, liveN) => {
+        const btn = document.createElement("button");
+        btn.className = "tab sport-tab" + (currentSport === sport ? " active" : "");
+        btn.dataset.sport = sport;
+        btn.appendChild(document.createTextNode(label));
+        if (liveN > 0) {
+          const tag = document.createElement("span");
+          tag.className = "live-tag";
+          tag.textContent = "LIVE";
+          btn.appendChild(tag);
+        }
+        wrap.appendChild(btn);
+      };
+      mkBtn("all", "Tất cả", 0);
       slugs.forEach(s => {
         const label = SPORT_LABELS[s] || ("• " + s);
-        const active = currentSport === s ? "active" : "";
-        const live = liveBySport[s] || 0;
-        const liveHtml = live > 0 ? `<span class="live-tag">LIVE</span>` : "";
-        html += `<button class="tab sport-tab ${active}" data-sport="${s}">${label}${liveHtml}</button>`;
+        mkBtn(s, label, liveBySport[s] || 0);
       });
-      wrap.innerHTML = html;
     }
 
     function updateCounts() {
@@ -1386,45 +1469,49 @@
           return (p[0][0] + p[p.length - 1][0]);
         };
         const teamBadge = (name, logo) => {
-          if (logo) {
-            return `<img src="${logo}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" />
-              <div class="team-avatar" style="display:none">${initials(name)}</div>`;
+          const ini = esc(initials(name));
+          const src = safeUrl(logo);
+          if (src) {
+            return `<img src="${esc(src)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" />
+              <div class="team-avatar" style="display:none">${ini}</div>`;
           }
-          return `<div class="team-avatar">${initials(name)}</div>`;
+          return `<div class="team-avatar">${ini}</div>`;
         };
         const streams = getStreams(m);
         const blvHtml = streams.length
           ? `<div class="blv-row">${streams.slice(0, 3).map(s =>
-              `<span class="blv-chip" title="${s.name}">${s.name}</span>`
+              `<span class="blv-chip" title="${esc(s.name)}">${esc(s.name)}</span>`
             ).join("")}${streams.length > 3 ? `<span class="blv-chip more">+${streams.length - 3}</span>` : ""}</div>`
           : "";
 
         const card = document.createElement("div");
         card.className = "card" + (cat === "live" ? " live" : "");
         card.tabIndex = 0;
+        const safeHomeLogo = safeUrl(logoHome || (!m._external ? thumb : ""));
+        const safeAwayLogo = safeUrl(logoAway || (!m._external ? thumb : ""));
         card.innerHTML = `
           <div class="card-top">
-            <div class="league" title="${league}">${league}</div>
+            <div class="league" title="${esc(league)}">${esc(league)}</div>
             <div class="badge ${cat}">${cat === "live" ? "LIVE" : cat === "soon" ? "SẮP TỚI" : "HẾT"}</div>
           </div>
           <div class="teams">
             <div class="team">
-              ${teamBadge(home, logoHome || (!m._external ? thumb : ""))}
-              <div class="team-name">${home}</div>
+              ${teamBadge(home, safeHomeLogo)}
+              <div class="team-name">${esc(home)}</div>
             </div>
             <div class="score-box">
-              <div class="score ${cat === "live" ? "live" : ""}">${hs} - ${as}</div>
-              <div class="time">${cat === "soon" ? fmtTime(m.start_time) : (m.match_time || "")}</div>
+              <div class="score ${cat === "live" ? "live" : ""}">${esc(hs)} - ${esc(as)}</div>
+              <div class="time">${esc(cat === "soon" ? fmtTime(m.start_time) : (m.match_time || ""))}</div>
             </div>
             <div class="team">
-              ${teamBadge(away, logoAway || (!m._external ? thumb : ""))}
-              <div class="team-name">${away}</div>
+              ${teamBadge(away, safeAwayLogo)}
+              <div class="team-name">${esc(away)}</div>
             </div>
           </div>
           ${blvHtml}
           <div class="card-bottom">
             <button class="watch-btn">${streams.length > 1 ? "Chọn BLV (" + streams.length + ")" : "Xem ngay"}</button>
-            <div class="views">${m.views_count ? (m.views_count + " xem") : ""}</div>
+            <div class="views">${m.views_count ? (esc(m.views_count) + " xem") : ""}</div>
           </div>
         `;
         const open = () => openPlayer(m);

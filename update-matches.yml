@@ -1,0 +1,353 @@
+name: Update matches.json
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch matches from xoiche
+        run: |
+          python3 << 'PY'
+          import json, urllib.request, time, ssl
+          from urllib.parse import urlparse
+
+          CTX = ssl.create_default_context()
+          ALLOWED = ("xoiche.live", "www.xoiche.live")
+
+          def host_ok(url):
+              try:
+                  p = urlparse(url)
+                  return p.scheme == "https" and (p.hostname or "").lower() in ALLOWED
+              except Exception:
+                  return False
+
+          class SafeRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  if not host_ok(newurl):
+                      raise urllib.error.HTTPError(newurl, code, "redirect host blocked", headers, fp)
+                  return urllib.request.HTTPRedirectHandler.redirect_request(
+                      self, req, fp, code, msg, headers, newurl
+                  )
+
+          opener = urllib.request.build_opener(SafeRedirect(), urllib.request.HTTPSHandler(context=CTX))
+
+          def get(url):
+              if not host_ok(url):
+                  raise ValueError("host not allowed: " + url[:80])
+              req = urllib.request.Request(url, headers={
+                  "User-Agent": "Mozilla/5.0 SportsH-Bot",
+                  "Accept": "application/json",
+              })
+              with opener.open(req, timeout=30) as r:
+                  return json.load(r)
+
+          base = "https://xoiche.live"
+          url = base + "/api/matches/?ordering=smart&page_size=100&site=xoiche"
+          results = []
+          for _ in range(8):
+              data = get(url)
+              results.extend(data.get("results") or [])
+              nxt = data.get("next")
+              if not nxt:
+                  break
+              cand = nxt if str(nxt).startswith("http") else base + str(nxt)
+              if not host_ok(cand):
+                  print("skip next host", cand[:80])
+                  break
+              url = cand
+              time.sleep(0.2)
+
+          def has_stream(m):
+              def ok(u):
+                  return u and ".m3u8" in str(u)
+              if ok(m.get("primary_stream_url")) or ok(m.get("backup_stream_url")):
+                  return True
+              for c in m.get("commentators") or []:
+                  if ok(c.get("stream_url")) or ok(c.get("flv_stream_url")):
+                      return True
+              for c in m.get("commentator_streams") or []:
+                  if ok(c.get("stream_url")):
+                      return True
+                  if ok((c.get("commentator") or {}).get("stream_url")):
+                      return True
+              return False
+
+          watch = [m for m in results if has_stream(m)]
+          out = {
+              "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "count": len(watch),
+              "results": watch,
+          }
+          with open("matches.json", "w", encoding="utf-8") as f:
+              json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+          print("saved", len(watch), "matches")
+          PY
+
+      - name: Fetch channels (M3U + Hội Quán + Thiên Đình)
+        if: always()
+        run: |
+          python3 << 'PY'
+          import json, urllib.request, time, re, ssl
+          from datetime import datetime
+          from urllib.parse import urlparse
+
+          # Xác minh TLS đầy đủ (không tắt CERT)
+          CTX = ssl.create_default_context()
+
+          # Hostname cụ thể (không tin mọi subdomain onrender.com)
+          ALLOWED_HOSTS = {
+              "bongda-1.onrender.com",
+              "api.cltvlv.com",
+              "live-api.keonhacaitp.one",
+              "sv.hoiquantv.xyz",
+              "sv.thiendinhtv.xyz",
+              "sv.bugiotv.xyz",
+              "api.plapi202624081158.com",
+              "xoiche.live",
+              "www.xoiche.live",
+          }
+
+          def host_allowed(url):
+              try:
+                  p = urlparse(url)
+                  if p.scheme != "https" or not p.hostname:
+                      return False
+                  return p.hostname.lower() in ALLOWED_HOSTS
+              except Exception:
+                  return False
+
+          class SafeRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  if not host_allowed(newurl):
+                      raise urllib.error.HTTPError(newurl, code, "redirect host blocked", headers, fp)
+                  return urllib.request.HTTPRedirectHandler.redirect_request(
+                      self, req, fp, code, msg, headers, newurl
+                  )
+
+          opener = urllib.request.build_opener(
+              SafeRedirect(), urllib.request.HTTPSHandler(context=CTX)
+          )
+
+          def get_bytes(url, timeout=45):
+              if not host_allowed(url):
+                  raise ValueError("host not allowed: " + url[:80])
+              req = urllib.request.Request(url, headers={
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SportsH-Bot",
+                  "Accept": "application/json, text/plain, */*",
+              })
+              with opener.open(req, timeout=timeout) as r:
+                  return r.read()
+
+          def get_text(url):
+              return get_bytes(url).decode("utf-8", "replace")
+
+          def get_json(url):
+              return json.loads(get_bytes(url).decode("utf-8", "replace"))
+
+          def parse_m3u(text, source):
+              out = []
+              cur = None
+              for raw in text.splitlines():
+                  line = raw.strip()
+                  if not line:
+                      continue
+                  if line.startswith("#EXTINF:"):
+                      comma = line.find(",")
+                      meta = line[:comma] if comma >= 0 else line
+                      name = line[comma+1:].strip() if comma >= 0 else "Kênh"
+                      g = re.search(r'group-title="([^"]*)"', meta, re.I)
+                      l = re.search(r'tvg-logo="([^"]*)"', meta, re.I)
+                      cur = {
+                          "name": name,
+                          "group": g.group(1) if g else "",
+                          "logo": l.group(1) if l else "",
+                          "source": source,
+                          "url": "",
+                      }
+                  elif not line.startswith("#") and cur is not None:
+                      if line.startswith("http"):
+                          cur["url"] = line
+                          out.append(cur)
+                      cur = None
+              return out
+
+          def pick_stream_url(obj):
+              """Tìm URL m3u8 trong object / list lồng nhau."""
+              if not obj:
+                  return None
+              candidates = []
+              def walk(x, depth=0):
+                  if depth > 6 or x is None:
+                      return
+                  if isinstance(x, str):
+                      if x.startswith("http") and (".m3u8" in x or "m3u8" in x):
+                          candidates.append(x)
+                      return
+                  if isinstance(x, dict):
+                      for k in ("sourceUrl", "stream_url", "streamUrl", "playStreamAddress2",
+                                "playStreamAddress", "url", "link", "streamSourceFhd",
+                                "streamSource", "flv_stream_url", "primary_stream_url"):
+                          v = x.get(k)
+                          if isinstance(v, str) and v.startswith("http"):
+                              candidates.append(v)
+                      for v in x.values():
+                          walk(v, depth + 1)
+                  elif isinstance(x, list):
+                      for i in x:
+                          walk(i, depth + 1)
+              walk(obj)
+              # Ưu tiên m3u8
+              for c in candidates:
+                  if ".m3u8" in c:
+                      return c
+              return candidates[0] if candidates else None
+
+          def parse_fixture_api(data, source, label):
+              out = []
+              items = []
+              if isinstance(data, list):
+                  items = data
+              elif isinstance(data, dict):
+                  for k in ("data", "results", "fixtures", "matches", "items"):
+                      if k in data and data[k] is not None:
+                          v = data[k]
+                          if isinstance(v, list):
+                              items = v
+                          elif isinstance(v, dict):
+                              items = list(v.values())
+                          break
+              for item in items:
+                  if not isinstance(item, dict):
+                      continue
+                  home = (item.get("homeTeam") or item.get("home_team") or {})
+                  away = (item.get("awayTeam") or item.get("away_team") or {})
+                  if isinstance(home, str):
+                      home_name = home
+                  else:
+                      home_name = home.get("name") or home.get("teamName") or item.get("home_name") or "?"
+                  if isinstance(away, str):
+                      away_name = away
+                  else:
+                      away_name = away.get("name") or away.get("teamName") or item.get("away_name") or "?"
+                  title = item.get("title") or item.get("name") or f"{home_name} VS {away_name}"
+                  league = ""
+                  for lk in ("league", "tournament", "competition"):
+                      lv = item.get(lk)
+                      if isinstance(lv, dict):
+                          league = lv.get("name") or ""
+                      elif isinstance(lv, str):
+                          league = lv
+                      if league:
+                          break
+                  # thời gian
+                  ts = item.get("matchTime") or item.get("start_time") or item.get("kickoff") or item.get("startTime")
+                  time_label = ""
+                  if isinstance(ts, (int, float)) and ts > 1e9:
+                      try:
+                          time_label = datetime.fromtimestamp(ts if ts < 1e12 else ts/1000).strftime("%H:%M - %d/%m")
+                      except Exception:
+                          pass
+                  elif isinstance(ts, str) and ts:
+                      time_label = ts[:16]
+                  blv = ""
+                  streams_block = (
+                      item.get("streams")
+                      or item.get("commentators")
+                      or item.get("anchorAppointmentVoList")
+                      or item.get("commentator")
+                      or item
+                  )
+                  if isinstance(streams_block, list) and streams_block:
+                      first = streams_block[0]
+                      if isinstance(first, dict):
+                          blv = first.get("name") or first.get("commentatorName") or first.get("nickName") or ""
+                  url = pick_stream_url(streams_block) or pick_stream_url(item)
+                  if not url:
+                      continue
+                  name = title
+                  if time_label:
+                      name = f"{time_label} | {title}"
+                  if blv:
+                      name = f"{name} | {blv}"
+                  logo = ""
+                  if isinstance(home, dict):
+                      logo = home.get("logoUrl") or home.get("logo") or ""
+                  out.append({
+                      "name": name,
+                      "group": league or label,
+                      "logo": logo,
+                      "source": source,
+                      "url": url,
+                  })
+              return out
+
+          all_ch = []
+          seen = set()
+
+          def add_items(items, tag):
+              n = 0
+              for ch in items:
+                  u = ch.get("url") or ""
+                  if not u or u in seen:
+                      continue
+                  seen.add(u)
+                  all_ch.append(ch)
+                  n += 1
+              print(tag, n)
+
+          # 1) M3U từ bongda-1
+          m3u_sources = {
+              "giovang": "https://bongda-1.onrender.com/giovang.m3u",
+              "cola": "https://bongda-1.onrender.com/cola.m3u",
+              "phalang": "https://bongda-1.onrender.com/phalang.m3u",
+          }
+          for k, url in m3u_sources.items():
+              try:
+                  add_items(parse_m3u(get_text(url), k), k)
+              except Exception as e:
+                  print("ERR", k, e)
+
+          # 2) API Hội Quán / Thiên Đình / Vòng Cấm
+          json_sources = [
+              ("hoiquan", "https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished", "Hội Quán"),
+              ("thiendinh", "https://sv.thiendinhtv.xyz/api/v1/external/fixtures/unfinished", "Thiên Đình"),
+              ("vongcam", "https://sv.bugiotv.xyz/internal/api/matches", "Vòng Cấm"),
+          ]
+          for key, url, label in json_sources:
+              try:
+                  data = get_json(url)
+                  items = parse_fixture_api(data, key, label)
+                  add_items(items, key)
+              except Exception as e:
+                  print("ERR", key, e)
+
+          out = {
+              "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "count": len(all_ch),
+              "channels": all_ch,
+          }
+          with open("channels.json", "w", encoding="utf-8") as f:
+              json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+          print("saved", len(all_ch), "channels")
+          PY
+
+      - name: Commit data files
+        if: always()
+        run: |
+          git config user.name "SportsH Bot"
+          git config user.email "bot@sportsh.local"
+          git add matches.json channels.json
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "chore: update matches.json and channels.json"
+            git push
+          fi
