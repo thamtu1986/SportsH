@@ -16,17 +16,39 @@ jobs:
       - name: Fetch matches from xoiche
         run: |
           python3 << 'PY'
-          import json, urllib.request, time
+          import json, urllib.request, time, ssl
+          from urllib.parse import urlparse
+
+          CTX = ssl.create_default_context()
+          ALLOWED = ("xoiche.live", "www.xoiche.live")
+
+          def host_ok(url):
+              try:
+                  p = urlparse(url)
+                  return p.scheme == "https" and (p.hostname or "").lower() in ALLOWED
+              except Exception:
+                  return False
+
+          class SafeRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  if not host_ok(newurl):
+                      raise urllib.error.HTTPError(newurl, code, "redirect host blocked", headers, fp)
+                  return urllib.request.HTTPRedirectHandler.redirect_request(
+                      self, req, fp, code, msg, headers, newurl
+                  )
+
+          opener = urllib.request.build_opener(SafeRedirect(), urllib.request.HTTPSHandler(context=CTX))
 
           def get(url):
+              if not host_ok(url):
+                  raise ValueError("host not allowed: " + url[:80])
               req = urllib.request.Request(url, headers={
                   "User-Agent": "Mozilla/5.0 SportsH-Bot",
                   "Accept": "application/json",
               })
-              with urllib.request.urlopen(req, timeout=30) as r:
+              with opener.open(req, timeout=30) as r:
                   return json.load(r)
 
-          from urllib.parse import urlparse
           base = "https://xoiche.live"
           url = base + "/api/matches/?ordering=smart&page_size=100&site=xoiche"
           results = []
@@ -36,16 +58,11 @@ jobs:
               nxt = data.get("next")
               if not nxt:
                   break
-              # Chỉ theo pagination trên xoiche.live (HTTPS)
               cand = nxt if str(nxt).startswith("http") else base + str(nxt)
-              try:
-                  p = urlparse(cand)
-                  if p.scheme != "https" or p.hostname not in ("xoiche.live", "www.xoiche.live"):
-                      print("skip next host", p.hostname)
-                      break
-                  url = cand
-              except Exception:
+              if not host_ok(cand):
+                  print("skip next host", cand[:80])
                   break
+              url = cand
               time.sleep(0.2)
 
           def has_stream(m):
@@ -63,7 +80,15 @@ jobs:
                       return True
               return False
 
-          watch = [m for m in results if has_stream(m)]
+          def is_relevant(m):
+              st = str(m.get("status") or "").lower()
+              if st in ("live", "inplay", "1h", "2h", "ht", "half_time", "halftime"):
+                  return True
+              if st in ("finished", "ft", "after_pen", "after_et", "postponed", "cancelled"):
+                  return has_stream(m)
+              return True
+
+          watch = [m for m in results if is_relevant(m)]
           out = {
               "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "count": len(watch),
@@ -75,6 +100,7 @@ jobs:
           PY
 
       - name: Fetch channels (M3U + Hội Quán + Thiên Đình)
+        if: always()
         run: |
           python3 << 'PY'
           import json, urllib.request, time, re, ssl
@@ -84,21 +110,39 @@ jobs:
           # Xác minh TLS đầy đủ (không tắt CERT)
           CTX = ssl.create_default_context()
 
-          ALLOWED_HOST_SUFFIXES = (
-              "onrender.com", "cltvlv.com", "keonhacaitp.one",
-              "hoiquantv.xyz", "thiendinhtv.xyz", "bugiotv.xyz",
-              "plapi202624081158.com", "xoiche.live",
-          )
+          # Hostname cụ thể (không tin mọi subdomain onrender.com)
+          ALLOWED_HOSTS = {
+              "bongda-1.onrender.com",
+              "api.cltvlv.com",
+              "live-api.keonhacaitp.one",
+              "sv.hoiquantv.xyz",
+              "sv.thiendinhtv.xyz",
+              "sv.bugiotv.xyz",
+              "api.plapi202624081158.com",
+              "xoiche.live",
+              "www.xoiche.live",
+          }
 
           def host_allowed(url):
               try:
                   p = urlparse(url)
                   if p.scheme != "https" or not p.hostname:
                       return False
-                  h = p.hostname.lower()
-                  return any(h == s or h.endswith("." + s) for s in ALLOWED_HOST_SUFFIXES)
+                  return p.hostname.lower() in ALLOWED_HOSTS
               except Exception:
                   return False
+
+          class SafeRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  if not host_allowed(newurl):
+                      raise urllib.error.HTTPError(newurl, code, "redirect host blocked", headers, fp)
+                  return urllib.request.HTTPRedirectHandler.redirect_request(
+                      self, req, fp, code, msg, headers, newurl
+                  )
+
+          opener = urllib.request.build_opener(
+              SafeRedirect(), urllib.request.HTTPSHandler(context=CTX)
+          )
 
           def get_bytes(url, timeout=45):
               if not host_allowed(url):
@@ -107,7 +151,7 @@ jobs:
                   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SportsH-Bot",
                   "Accept": "application/json, text/plain, */*",
               })
-              with urllib.request.urlopen(req, timeout=timeout, context=CTX) as r:
+              with opener.open(req, timeout=timeout) as r:
                   return r.read()
 
           def get_text(url):
@@ -304,6 +348,7 @@ jobs:
           PY
 
       - name: Commit data files
+        if: always()
         run: |
           git config user.name "SportsH Bot"
           git config user.email "bot@sportsh.local"
