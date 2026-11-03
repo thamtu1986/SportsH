@@ -211,6 +211,12 @@
       color: #3e2723;
       box-shadow: 0 4px 16px rgba(249,168,37,.35);
     }
+    .tab[data-source="gavang"].active {
+      background: linear-gradient(135deg, #ff8f00, #ffc107);
+      border-color: transparent;
+      color: #3e2723;
+      box-shadow: 0 4px 16px rgba(255,143,0,.35);
+    }
     .tab[data-source="cola"].active {
       background: linear-gradient(135deg, #e53935, #ef5350);
       border-color: transparent;
@@ -717,6 +723,7 @@
       <button class="tab active" data-source="all">✨ Mọi nguồn</button>
       <button class="tab" data-source="xoiche">📺 Xoiche</button>
       <button class="tab" data-source="giovang">🥇 Giờ Vàng</button>
+      <button class="tab" data-source="gavang">🐔 Gà Vàng</button>
       <button class="tab" data-source="cola">🥤 Cola</button>
       <button class="tab" data-source="phalang">⚔️ PhaLang</button>
       <button class="tab" data-source="hoiquan">🏠 Hội Quán</button>
@@ -763,266 +770,83 @@
   <script>
     const API = "https://xoiche.live/api/matches/?ordering=smart&page_size=100&site=xoiche";
     const BASE = "https://xoiche.live";
-    // File cùng repo — không bị CORS / 403
-    const LOCAL_JSON = "matches.json";
-    // Nguồn M3U đa nguồn (bongda-1)
-    const CHANNEL_SOURCES = {
-      giovang: "https://bongda-1.onrender.com/giovang.m3u",
-      cola: "https://bongda-1.onrender.com/cola.m3u",
-      phalang: "https://bongda-1.onrender.com/phalang.m3u",
-      live: "https://bongda-1.onrender.com/live.m3u"
-    };
+    // Cùng origin với GitHub Pages → không CORS
+    const LOCAL_MATCHES = "matches.json";
+    const LOCAL_CHANNELS = "channels.json";
 
-    const PROXIES = [
-      (url) => url,
+    // Proxy chỉ cho API danh sách trận (xoiche). Không đưa URL stream qua proxy.
+    const PROXY_WRAPS = [
       (url) => "https://corsproxy.io/?" + encodeURIComponent(url),
       (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
       (url) => "https://corsproxy.org/?" + encodeURIComponent(url)
     ];
-    let useProxyIndex = 0;
+    let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
     let allMatches = [];
     let currentTab = "live";
     let currentSport = "all";
-    let currentSource = "all"; // all | xoiche | giovang | cola | phalang
+    let currentSource = "all";
     let hls = null;
     let refreshTimer = null;
 
+    async function fetchSameOriginJson(path) {
+      try {
+        const res = await fetch(path + "?t=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return null;
+        return await res.json();
+      } catch (_) {
+        return null;
+      }
+    }
+
+    /** Gọi API cross-origin; GitHub Pages ưu tiên proxy để tránh CORS */
     async function fetchJson(url) {
+      const attempts = [];
+      if (preferProxy) {
+        PROXY_WRAPS.forEach((w) => attempts.push(w(url)));
+        attempts.push(url);
+      } else {
+        attempts.push(url);
+        PROXY_WRAPS.forEach((w) => attempts.push(w(url)));
+      }
       let lastErr;
-      // Mỗi lần thử lại từ đầu, không kẹt proxy lỗi
-      for (let i = 0; i < PROXIES.length; i++) {
-        const idx = (useProxyIndex + i) % PROXIES.length;
-        const reqUrl = PROXIES[idx](url);
+      for (const reqUrl of attempts) {
         try {
           const ctrl = new AbortController();
           const timer = setTimeout(() => ctrl.abort(), 12000);
           const res = await fetch(reqUrl, {
             signal: ctrl.signal,
-            headers: { "Accept": "application/json" },
+            headers: { Accept: "application/json" },
             cache: "no-store"
           });
           clearTimeout(timer);
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
-          useProxyIndex = idx;
+          // Nếu proxy chạy được lần đầu → giữ preferProxy
+          if (reqUrl !== url) preferProxy = true;
+          else preferProxy = false;
           return data;
         } catch (e) {
           lastErr = e;
         }
       }
-      throw lastErr || new Error("Network error");
+      throw lastErr || new Error("Network/CORS error");
     }
 
     async function fetchLocalMatches() {
-      try {
-        const res = await fetch(LOCAL_JSON + "?t=" + Date.now(), { cache: "no-store" });
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (data && Array.isArray(data.results)) return data;
-        if (Array.isArray(data)) return { results: data };
-      } catch (_) {}
+      const data = await fetchSameOriginJson(LOCAL_MATCHES);
+      if (!data) return null;
+      if (Array.isArray(data.results)) return data;
+      if (Array.isArray(data)) return { results: data };
       return null;
     }
 
-    async function fetchText(url) {
-      let lastErr;
-      // Trên GitHub Pages ưu tiên proxy trước (tránh CORS)
-      const order = location.hostname.includes("github.io")
-        ? [1, 2, 3, 0]
-        : [0, 1, 2, 3];
-      for (const idx of order) {
-        const reqUrl = PROXIES[idx](url);
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 25000);
-          const res = await fetch(reqUrl, { signal: ctrl.signal, cache: "no-store" });
-          clearTimeout(timer);
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          const text = await res.text();
-          if (!text || text.length < 20) throw new Error("Empty response");
-          // Proxy đôi khi trả HTML lỗi
-          if (/^\s*</.test(text) && !text.includes("#EXTINF")) {
-            throw new Error("HTML instead of M3U");
-          }
-          useProxyIndex = idx;
-          return text;
-        } catch (e) {
-          lastErr = e;
-        }
-      }
-      throw lastErr || new Error("Network error");
-    }
-
-    function parseM3U(text, sourceTag) {
-      const lines = String(text || "").split(/\r?\n/);
-      const list = [];
-      let cur = null;
-      for (const raw of lines) {
-        const line = raw.trim();
-        if (!line) continue;
-        if (line.startsWith("#EXTINF:")) {
-          const comma = line.indexOf(",");
-          const meta = comma >= 0 ? line.slice(0, comma) : line;
-          const name = comma >= 0 ? line.slice(comma + 1).trim() : "Kênh";
-          let group = "";
-          let logo = "";
-          const g = meta.match(/group-title="([^"]*)"/i);
-          const l = meta.match(/tvg-logo="([^"]*)"/i);
-          if (g) group = g[1];
-          if (l) logo = l[1];
-          cur = { name, group, logo, source: sourceTag, url: "" };
-        } else if (!line.startsWith("#") && cur) {
-          cur.url = line;
-          if (cur.url && /^https?:\/\//i.test(cur.url)) list.push(cur);
-          cur = null;
-        }
-      }
-      return list;
-    }
-
-    async function loadChannelsLocal() {
-      try {
-        const res = await fetch("channels.json?t=" + Date.now(), { cache: "no-store" });
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (data && Array.isArray(data.channels)) return data.channels;
-        if (Array.isArray(data)) return data;
-      } catch (_) {}
-      return null;
-    }
-
-    async function loadChannels() {
-      statusText.textContent = "Đang tải kênh live...";
-      state.style.display = "block";
-      state.innerHTML = `<div class="spinner"></div>Đang tải kênh...`;
-      grid.innerHTML = "";
-      allChannels = [];
-      try {
-        // Ưu tiên channels.json cùng repo (tránh NetworkError / CORS trên GitHub Pages)
-        let list = await loadChannelsLocal();
-        let from = "cache";
-
-        if (list && list.length && currentChSrc !== "all" && currentChSrc !== "live") {
-          list = list.filter((ch) => (ch.source || "") === currentChSrc);
-        }
-
-        // Thử live M3U nếu chưa có cache
-        if (!list || !list.length) {
-          const keys = currentChSrc === "live" ? ["live"]
-            : currentChSrc === "all" ? ["giovang", "cola", "phalang"]
-            : [currentChSrc];
-          const errors = [];
-          const chunks = [];
-          for (const k of keys) {
-            try {
-              statusText.textContent = "Đang tải " + k + "...";
-              const text = await fetchText(CHANNEL_SOURCES[k]);
-              chunks.push(parseM3U(text, k));
-            } catch (e) {
-              errors.push(k + ": " + (e.message || "lỗi"));
-              chunks.push([]);
-            }
-          }
-          const seen = new Set();
-          const liveList = [];
-          chunks.flat().forEach((ch) => {
-            if (!ch.url || seen.has(ch.url)) return;
-            seen.add(ch.url);
-            liveList.push(ch);
-          });
-          if (liveList.length) {
-            list = liveList;
-            from = "live";
-          } else {
-            state.style.display = "block";
-            statusText.textContent = "0 kênh";
-            state.innerHTML = `Không tải được kênh từ trình duyệt.<br/>
-              Upload file <b>channels.json</b> lên GitHub (có trong zip mới).<br/>
-              <span style="font-size:.75rem;opacity:.7">${errors.join(" · ")}</span>`;
-            return;
-          }
-        }
-
-        allChannels = list || [];
-        updatedAt.textContent = "Cập nhật " + new Date().toLocaleTimeString("vi-VN") + " · " + from;
-        statusText.textContent = allChannels.length + " kênh";
-        liveDot.style.display = allChannels.length ? "inline-block" : "none";
-        renderChannels();
-      } catch (e) {
-        console.error(e);
-        statusText.textContent = "Lỗi tải kênh";
-        state.style.display = "block";
-        state.textContent = "";
-        state.appendChild(document.createTextNode("Không tải được kênh. "));
-        const det = document.createElement("span");
-        det.style.cssText = "font-size:.75rem;opacity:.7";
-        det.textContent = e.message || "";
-        state.appendChild(det);
-      }
-    }
-
-    function filteredChannels() {
-      const q = (searchInput.value || "").trim().toLowerCase();
-      return allChannels.filter((ch) => {
-        if (!q) return true;
-        return (ch.name + " " + ch.group + " " + ch.source).toLowerCase().includes(q);
-      });
-    }
-
-    function renderChannels() {
-      const list = filteredChannels();
-      grid.innerHTML = "";
-      if (!list.length) {
-        state.style.display = "block";
-        state.innerHTML = allChannels.length
-          ? "Không có kênh phù hợp với từ khóa tìm kiếm."
-          : "Chưa có kênh. Bấm ⟳ để tải lại.";
-        return;
-      }
-      state.style.display = "none";
-      const frag = document.createDocumentFragment();
-      list.forEach((ch) => {
-        const card = document.createElement("div");
-        card.className = "card channel-card";
-        card.tabIndex = 0;
-        const logo = safeUrl(ch.logo || "");
-        card.innerHTML = `
-          <img class="channel-logo" src="${esc(logo)}" alt="" onerror="this.style.display='none'" />
-          <div class="channel-meta">
-            <div class="channel-name">${esc(ch.name)}</div>
-            <div class="channel-group">${esc(ch.group || ch.source || "Live")}</div>
-          </div>
-          <button class="watch-btn" type="button">Xem</button>
-        `;
-        const open = () => playUrl(ch.url, ch.name);
-        card.addEventListener("click", open);
-        card.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
-        });
-        frag.appendChild(card);
-      });
-      grid.appendChild(frag);
-    }
-
-    function setMode(mode) {
-      currentMode = mode;
-      document.querySelectorAll("#modeTabs .mode-tab").forEach((t) => {
-        t.classList.toggle("active", t.dataset.mode === mode);
-      });
-      const matchPanel = document.getElementById("matchPanel");
-      const chFilters = document.getElementById("channelFilters");
-      if (mode === "matches") {
-        matchPanel.classList.remove("hidden");
-        chFilters.classList.add("hidden");
-        searchInput.placeholder = "Tìm đội, giải đấu...";
-        fetchMatches();
-      } else {
-        matchPanel.classList.add("hidden");
-        chFilters.classList.remove("hidden");
-        searchInput.placeholder = "Tìm kênh, nhóm...";
-        loadChannels();
-      }
+    async function fetchLocalChannels() {
+      const data = await fetchSameOriginJson(LOCAL_CHANNELS);
+      if (!data) return [];
+      if (Array.isArray(data.channels)) return data.channels;
+      if (Array.isArray(data)) return data;
+      return [];
     }
 
     const SPORT_LABELS = {
@@ -1036,6 +860,10 @@
       hockey: "🏒 Khúc côn cầu",
       baseball: "⚾ Bóng chày",
       handball: "🤾 Bóng ném"
+    };
+    const SRC_LABELS = {
+      giovang: "Giờ Vàng", gavang: "Gà Vàng", cola: "Cola", phalang: "PhaLang",
+      hoiquan: "Hội Quán", thiendinh: "Thiên Đình", vongcam: "Vòng Cấm", xoiche: "Xoiche"
     };
 
     const grid = document.getElementById("grid");
@@ -1158,10 +986,6 @@
         if (parts[2]) blv = parts[2];
       }
       const src = (ch.source || "other").toLowerCase();
-      const SRC_LABELS = {
-        giovang: "Giờ Vàng", cola: "Cola", phalang: "PhaLang",
-        hoiquan: "Hội Quán", thiendinh: "Thiên Đình", vongcam: "Vòng Cấm", xoiche: "Xoiche"
-      };
       const srcLabel = SRC_LABELS[src] || src;
       // Ước lượng trạng thái theo GIỜ + NGÀY trong tên (vd: "15:30 - 04/11")
       let status = "scheduled";
@@ -1224,30 +1048,30 @@
         let results = [];
         let source = "";
 
-        // 1) xoiche — ưu tiên API nếu cache cũ (>15 phút) hoặc thiếu trận live
+        // 1) xoiche — LUÔN gọi API (tỉ số/phút live); cache chỉ khi API lỗi/CORS
         const local = await fetchLocalMatches();
-        let cacheAgeMin = 9999;
-        if (local && local.updated_at) {
-          cacheAgeMin = (Date.now() - new Date(local.updated_at).getTime()) / 60000;
-        }
         let usedApi = false;
         try {
-          if (!local || !local.results || !local.results.length || cacheAgeMin > 15) {
-            let url = API;
-            let safetyLoop = 0;
-            while (url && safetyLoop < 10) {
-              const data = await fetchJson(url);
-              if (data && data.results) results = results.concat(data.results);
-              else if (Array.isArray(data)) { results = results.concat(data); break; }
-              if (data && data.next) url = data.next.startsWith("http") ? data.next : (BASE + data.next);
-              else break;
-              safetyLoop++;
-            }
-            if (results.length) {
-              results = results.map((m) => ({ ...m, _source: "xoiche" }));
-              source = "api";
-              usedApi = true;
-            }
+          let url = API;
+          let safetyLoop = 0;
+          while (url && safetyLoop < 10) {
+            const data = await fetchJson(url);
+            if (data && data.results) results = results.concat(data.results);
+            else if (Array.isArray(data)) { results = results.concat(data); break; }
+            if (data && data.next) {
+              const nxt = data.next.startsWith("http") ? data.next : (BASE + data.next);
+              try {
+                const h = new URL(nxt).hostname;
+                if (h !== "xoiche.live" && h !== "www.xoiche.live") break;
+              } catch (_) { break; }
+              url = nxt;
+            } else break;
+            safetyLoop++;
+          }
+          if (results.length) {
+            results = results.map((m) => ({ ...m, _source: "xoiche" }));
+            source = "api";
+            usedApi = true;
           }
         } catch (apiErr) {
           console.warn("xoiche API", apiErr);
@@ -1262,23 +1086,17 @@
         const liveSoon = notDone.filter(m => classify(m) === "live" || classify(m) === "soon" || hasWatchableStream(m));
         const done = results.filter(m => classify(m) === "done" && hasWatchableStream(m)).slice(0, 30);
 
-        // 2) Gộp kênh live (Giờ Vàng / Cola / PhaLang) từ channels.json
+        // 2) Nguồn phụ từ channels.json (cùng origin — không CORS)
         let extra = [];
         try {
-          const res = await fetch("channels.json?t=" + Date.now(), { cache: "no-store" });
-          if (res.ok) {
-            const data = await res.json();
-            const chs = data.channels || data || [];
-            if (Array.isArray(chs)) {
-              extra = chs.map((ch, i) => channelToMatch(ch, i));
-            }
-          }
+          const chs = await fetchLocalChannels();
+          extra = chs.map((ch, i) => channelToMatch(ch, i));
         } catch (_) {}
 
         allMatches = liveSoon.concat(extra).concat(done);
 
         const now = new Date();
-        updatedAt.textContent = "Cập nhật " + now.toLocaleTimeString("vi-VN") + (source === "cache" ? " · cache" : "");
+        updatedAt.textContent = "Cập nhật " + now.toLocaleTimeString("vi-VN") + " · " + (source || "api");
         const liveCount = allMatches.filter(m => classify(m) === "live").length;
         statusText.textContent = allMatches.length + " trận · " + liveCount + " live · " + extra.length + " nguồn phụ";
         liveDot.style.display = liveCount ? "inline-block" : "none";
@@ -1447,16 +1265,25 @@
         const cat = classify(m);
         const home = m.home_team?.name || m.home_team_name || "?";
         const away = m.away_team?.name || m.away_team_name || "?";
-        const hs = m.home_score ?? 0;
-        const as = m.away_score ?? 0;
+        const hs = m.home_score ?? m.homeScore ?? 0;
+        const as = m.away_score ?? m.awayScore ?? 0;
+        // match_time API: số phút (77) hoặc "Live" / "HT"
+        let clock = "";
+        if (cat === "live") {
+          const mt = m.match_time;
+          if (mt != null && mt !== "") {
+            const n = Number(mt);
+            clock = Number.isFinite(n) ? (n + "'") : String(mt);
+          }
+        } else if (cat === "soon") {
+          clock = fmtTime(m.start_time);
+        } else {
+          clock = m.match_time ? String(m.match_time) : "";
+        }
         let league = m.tournament?.name || m.tournament_name || m.sport?.name || m.sport_name || "Thể thao";
         const src = m._source || "xoiche";
         if (src && src !== "xoiche") {
-          const SRC_LABELS2 = {
-            giovang: "Giờ Vàng", cola: "Cola", phalang: "PhaLang",
-            hoiquan: "Hội Quán", thiendinh: "Thiên Đình", vongcam: "Vòng Cấm", xoiche: "Xoiche"
-          };
-          const srcLabel = SRC_LABELS2[src] || src;
+          const srcLabel = SRC_LABELS[src] || src;
           league = srcLabel + (league ? " · " + league : "");
         }
         const logoHome = absUrl(m.home_team?.logo || m.home_team_logo);
@@ -1501,7 +1328,7 @@
             </div>
             <div class="score-box">
               <div class="score ${cat === "live" ? "live" : ""}">${esc(hs)} - ${esc(as)}</div>
-              <div class="time">${esc(cat === "soon" ? fmtTime(m.start_time) : (m.match_time || ""))}</div>
+              <div class="time">${esc(clock)}</div>
             </div>
             <div class="team">
               ${teamBadge(away, safeAwayLogo)}
