@@ -121,6 +121,8 @@ jobs:
               "api.plapi202624081158.com",
               "xoiche.live",
               "www.xoiche.live",
+              "gavangtv-api.adviceme.io",
+              "api.gvapi.cc",
           }
 
           def host_allowed(url):
@@ -336,6 +338,97 @@ jobs:
                   add_items(items, key)
               except Exception as e:
                   print("ERR", key, e)
+
+          # 3) Gà Vàng + Cola API (dict theo slug trận)
+          def parse_gavang_style(data, source, label):
+              out = []
+              root = data.get("data") if isinstance(data, dict) else data
+              if isinstance(root, dict):
+                  items = list(root.values())
+              elif isinstance(root, list):
+                  items = root
+              else:
+                  items = []
+              for item in items:
+                  if not isinstance(item, dict):
+                      continue
+                  home = item.get("homeTeamName") or item.get("home_name") or "?"
+                  away = item.get("awayTeamName") or item.get("away_name") or "?"
+                  logo = item.get("homeTeamLogo") or item.get("home_logo") or ""
+                  league = item.get("leagueName") or item.get("tournamentName") or label
+                  # thời gian
+                  time_label = ""
+                  ts = item.get("matchTime") or item.get("startTime")
+                  if isinstance(ts, (int, float)) and ts > 1e9:
+                      try:
+                          tsv = ts if ts < 1e12 else ts / 1000
+                          time_label = datetime.fromtimestamp(tsv).strftime("%H:%M - %d/%m")
+                      except Exception:
+                          pass
+                  # status
+                  st = item.get("matchStatus") or item.get("status")
+                  st_s = str(st).lower()
+                  # streams từ BLV
+                  blv = ""
+                  stream_url = None
+                  for a in item.get("anchorAppointmentVoList") or []:
+                      if not isinstance(a, dict):
+                          continue
+                      blv = blv or a.get("nickName") or a.get("name") or ""
+                      for u in a.get("streamUrls") or []:
+                          if isinstance(u, str) and u.startswith("http") and ".m3u8" in u:
+                              stream_url = u
+                              break
+                      if stream_url:
+                          break
+                      for s in a.get("servers") or []:
+                          if isinstance(s, dict):
+                              u = s.get("url") or s.get("sourceUrl") or ""
+                          else:
+                              u = str(s or "")
+                          if u.startswith("http") and ".m3u8" in u:
+                              stream_url = u
+                              break
+                      if stream_url:
+                          break
+                  if not stream_url:
+                      for k in ("streamUrl", "playUrl", "url", "m3u8"):
+                          u = item.get(k)
+                          if isinstance(u, str) and u.startswith("http") and ".m3u8" in u:
+                              stream_url = u
+                              break
+                  if not stream_url:
+                      continue
+                  title = f"{home} VS {away}"
+                  name = title
+                  if time_label:
+                      name = f"{time_label} | {title}"
+                  if blv:
+                      name = f"{name} | {blv}"
+                  # gắn league
+                  if league and league != label:
+                      name = name.replace(title, f"{title} ({league})", 1)
+                  out.append({
+                      "name": name,
+                      "group": league or label,
+                      "logo": logo if isinstance(logo, str) else "",
+                      "source": source,
+                      "url": stream_url,
+                  })
+              return out
+
+          gavang_sources = [
+              ("gavang", "https://gavangtv-api.adviceme.io/api/v1/matches?webType=gavang", "Gà Vàng"),
+              ("gavang", "https://api.gvapi.cc/api/matches", "Gà Vàng"),  # backup, cùng source key
+              ("cola", "https://gavangtv-api.adviceme.io/api/v1/matches?webType=cola", "Cola"),
+          ]
+          for key, url, label in gavang_sources:
+              try:
+                  data = get_json(url)
+                  items = parse_gavang_style(data, key, label)
+                  add_items(items, key + "-api")
+              except Exception as e:
+                  print("ERR", key, url[:40], e)
 
           out = {
               "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
