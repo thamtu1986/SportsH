@@ -110,7 +110,7 @@ jobs:
         if: always()
         run: |
           python3 << 'PY'
-          import json, urllib.request, time, re, ssl
+          import json, urllib.request, time, re, ssl, os
           from datetime import datetime
           from urllib.parse import urlparse
 
@@ -437,72 +437,99 @@ jobs:
               except Exception as e:
                   print("ERR", key, url[:40], e)
 
-          # SH-15: last-known-good — không ghi đè bằng danh sách rỗng
-          MIN_CHANNELS = 5
-          if len(all_ch) < MIN_CHANNELS:
-              print(
-                  "WARN: only", len(all_ch),
-                  "channels (<", MIN_CHANNELS, ") — keep previous channels.json"
-              )
-              raise SystemExit(0)
-
-          # SH-16/SH-17: chuẩn hóa stream URL trước khi xuất bản
-          def is_private_host(host):
-              h = (host or "").lower()
-              if h in ("localhost", "127.0.0.1", "::1") or h.endswith(".local"):
-                  return True
-              if h.startswith("10.") or h.startswith("192.168.") or h.startswith("169.254."):
-                  return True
-              if h.startswith("172."):
-                  try:
-                      second = int(h.split(".")[1])
-                      if 16 <= second <= 31:
-                          return True
-                  except Exception:
-                      pass
-              return False
+          # SH-16/SH-17/SH-26: validate stream URL (HLS HTTPS only)
+          import ipaddress
 
           def validate_stream_url(u):
               try:
                   p = urlparse(u)
                   if p.scheme != "https":
                       return False
-                  if not p.hostname or is_private_host(p.hostname):
+                  if not p.hostname or p.username or p.password:
                       return False
-                  if p.username or p.password:
-                      return False
+                  try:
+                      ip = ipaddress.ip_address(p.hostname)
+                      if not ip.is_global:
+                          return False
+                  except ValueError:
+                      pass  # hostname DNS — OK
                   path = (p.path or "").lower()
-                  if "rtmp" in (p.scheme or "") or path.endswith(".flv"):
+                  if not path.endswith(".m3u8"):
                       return False
-                  if ".m3u8" not in u.lower():
+                  if path.endswith(".flv"):
                       return False
                   return True
               except Exception:
                   return False
 
-          cleaned = []
+          # SH-22: tách stream vs event_link (không trộn upcoming page vào channels)
+          streams = []
+          event_links = []
           for ch in all_ch:
               u = ch.get("url") or ""
+              item = dict(ch)
               if validate_stream_url(u):
-                  cleaned.append(ch)
+                  item["type"] = "stream"
+                  streams.append(item)
+              elif u.startswith("https://") and "/upcoming/" in u:
+                  item["type"] = "event_link"
+                  event_links.append(item)
               else:
-                  print("drop stream", (u or "")[:80])
-          if len(cleaned) < MIN_CHANNELS:
-              print("WARN: after validate only", len(cleaned), "— keep previous")
+                  print("drop url", u[:80])
+
+          # SH-15/SH-23: Quality Gate + last-known-good
+          MIN_STREAMS = 5
+          MIN_RETENTION_RATIO = 0.50
+          prev_count = 0
+          try:
+              with open("channels.json", "r", encoding="utf-8") as f:
+                  prev = json.load(f)
+              prev_count = int(prev.get("count") or len(prev.get("channels") or prev.get("streams") or []))
+          except Exception:
+              prev_count = 0
+
+          status = "updated"
+          reason = "ok"
+          if len(streams) < MIN_STREAMS:
+              status = "skipped_quality_gate"
+              reason = "insufficient_valid_streams"
+              print("WARN:", reason, "got", len(streams), "prev", prev_count)
+          elif prev_count and len(streams) < prev_count * MIN_RETENTION_RATIO:
+              status = "skipped_quality_gate"
+              reason = "unexpected_channel_count_drop"
+              print("WARN:", reason, "got", len(streams), "prev", prev_count)
+
+          # Ghi summary cho Actions (SH-24)
+          with open(os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null"), "a", encoding="utf-8") as sm:
+              sm.write(
+                  f"### Channels quality gate\n"
+                  f"- status: `{status}`\n"
+                  f"- reason: `{reason}`\n"
+                  f"- streams: {len(streams)}\n"
+                  f"- event_links: {len(event_links)}\n"
+                  f"- previous_count: {prev_count}\n"
+                  f"- previous_snapshot_preserved: {status != 'updated'}\n"
+              )
+
+          if status != "updated":
+              # Giữ channels.json cũ — không ghi đè
               raise SystemExit(0)
 
           out = {
               "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "count": len(cleaned),
-              "channels": cleaned,
+              "count": len(streams),
+              "channels": streams,  # tương thích frontend cũ
+              "streams": streams,
+              "event_links": event_links,
           }
           with open("channels.json", "w", encoding="utf-8") as f:
               json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
-          print("saved", len(cleaned), "channels")
+          print("saved", len(streams), "streams,", len(event_links), "event_links")
           PY
 
+      # SH-25: chỉ commit khi các step trước success (không always)
       - name: Commit data files
-        if: always()
+        if: success()
         run: |
           git config user.name "SportsH Bot"
           git config user.email "bot@sportsh.local"
