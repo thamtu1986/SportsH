@@ -1248,8 +1248,32 @@
       });
     }
 
+    /** Ưu tiên: có link xem → bóng đá → đang live → giờ bắt đầu */
+    function sortMatches(list) {
+      const sportRank = (m) => (sportSlug(m) === "football" ? 0 : 1);
+      const streamRank = (m) => (hasWatchableStream(m) ? 0 : 1);
+      const catRank = (m) => {
+        const c = classify(m);
+        return c === "live" ? 0 : c === "soon" ? 1 : 2;
+      };
+      const startMs = (m) => {
+        const t = m.start_time || m.kickoff;
+        if (!t) return 0;
+        const n = new Date(t).getTime();
+        return isNaN(n) ? 0 : n;
+      };
+      return list.slice().sort((a, b) => {
+        return (
+          streamRank(a) - streamRank(b) ||
+          catRank(a) - catRank(b) ||
+          sportRank(a) - sportRank(b) ||
+          startMs(a) - startMs(b)
+        );
+      });
+    }
+
     function render() {
-      const list = filtered();
+      const list = sortMatches(filtered());
       grid.innerHTML = "";
       if (!list.length) {
         state.style.display = "block";
