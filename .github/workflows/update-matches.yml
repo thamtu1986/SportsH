@@ -89,6 +89,13 @@ jobs:
               return True
 
           watch = [m for m in results if is_relevant(m)]
+          # SH-15: không ghi đè matches.json bằng danh sách rỗng (API lỗi)
+          if not watch and results:
+              # Có data nhưng filter hết — vẫn ghi (có thể hết trận)
+              pass
+          if not results:
+              print("WARN: xoiche returned 0 results — keep previous matches.json")
+              raise SystemExit(0)
           out = {
               "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "count": len(watch),
@@ -430,14 +437,68 @@ jobs:
               except Exception as e:
                   print("ERR", key, url[:40], e)
 
+          # SH-15: last-known-good — không ghi đè bằng danh sách rỗng
+          MIN_CHANNELS = 5
+          if len(all_ch) < MIN_CHANNELS:
+              print(
+                  "WARN: only", len(all_ch),
+                  "channels (<", MIN_CHANNELS, ") — keep previous channels.json"
+              )
+              raise SystemExit(0)
+
+          # SH-16/SH-17: chuẩn hóa stream URL trước khi xuất bản
+          def is_private_host(host):
+              h = (host or "").lower()
+              if h in ("localhost", "127.0.0.1", "::1") or h.endswith(".local"):
+                  return True
+              if h.startswith("10.") or h.startswith("192.168.") or h.startswith("169.254."):
+                  return True
+              if h.startswith("172."):
+                  try:
+                      second = int(h.split(".")[1])
+                      if 16 <= second <= 31:
+                          return True
+                  except Exception:
+                      pass
+              return False
+
+          def validate_stream_url(u):
+              try:
+                  p = urlparse(u)
+                  if p.scheme != "https":
+                      return False
+                  if not p.hostname or is_private_host(p.hostname):
+                      return False
+                  if p.username or p.password:
+                      return False
+                  path = (p.path or "").lower()
+                  if "rtmp" in (p.scheme or "") or path.endswith(".flv"):
+                      return False
+                  if ".m3u8" not in u.lower():
+                      return False
+                  return True
+              except Exception:
+                  return False
+
+          cleaned = []
+          for ch in all_ch:
+              u = ch.get("url") or ""
+              if validate_stream_url(u):
+                  cleaned.append(ch)
+              else:
+                  print("drop stream", (u or "")[:80])
+          if len(cleaned) < MIN_CHANNELS:
+              print("WARN: after validate only", len(cleaned), "— keep previous")
+              raise SystemExit(0)
+
           out = {
               "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "count": len(all_ch),
-              "channels": all_ch,
+              "count": len(cleaned),
+              "channels": cleaned,
           }
           with open("channels.json", "w", encoding="utf-8") as f:
               json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
-          print("saved", len(all_ch), "channels")
+          print("saved", len(cleaned), "channels")
           PY
 
       - name: Commit data files
