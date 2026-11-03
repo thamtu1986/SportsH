@@ -888,7 +888,7 @@
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
     }
-    /** Chỉ chấp nhận http(s) cho src/href */
+    /** Logo / link ảnh: http(s) */
     function safeUrl(u) {
       const s = String(u || "").trim();
       if (!s) return "";
@@ -897,6 +897,30 @@
         if (x.protocol === "http:" || x.protocol === "https:") return x.href;
       } catch (_) {}
       return "";
+    }
+    /** Stream phát: chỉ HTTPS + host công khai + có .m3u8 (tách khỏi safeUrl) */
+    function validateStreamUrl(u) {
+      const s = String(u || "").trim();
+      if (!s || !s.toLowerCase().includes(".m3u8")) return "";
+      try {
+        const x = new URL(s);
+        if (x.protocol !== "https:") return "";
+        if (!x.hostname) return "";
+        if (x.username || x.password) return "";
+        const h = x.hostname.toLowerCase();
+        if (
+          h === "localhost" || h === "127.0.0.1" || h === "::1" ||
+          h.endsWith(".local") || h.startsWith("10.") ||
+          h.startsWith("192.168.") || h.startsWith("169.254.")
+        ) return "";
+        if (h.startsWith("172.")) {
+          const n = parseInt(h.split(".")[1], 10);
+          if (n >= 16 && n <= 31) return "";
+        }
+        return x.href;
+      } catch (_) {
+        return "";
+      }
     }
 
     function fmtTime(iso) {
@@ -933,10 +957,11 @@
       const list = [];
       const seen = new Set();
       const add = (name, url) => {
-        if (!url || !String(url).includes(".m3u8")) return;
-        if (seen.has(url)) return;
-        seen.add(url);
-        list.push({ name: name || ("Kênh " + (list.length + 1)), url });
+        const ok = validateStreamUrl(url);
+        if (!ok) return;
+        if (seen.has(ok)) return;
+        seen.add(ok);
+        list.push({ name: name || ("Kênh " + (list.length + 1)), url: ok });
       };
       const commentators = m.commentators || [];
       for (const c of commentators) {
@@ -1061,8 +1086,11 @@
             if (data && data.next) {
               const nxt = data.next.startsWith("http") ? data.next : (BASE + data.next);
               try {
-                const h = new URL(nxt).hostname;
-                if (h !== "xoiche.live" && h !== "www.xoiche.live") break;
+                const parsed = new URL(nxt);
+                if (
+                  parsed.protocol !== "https:" ||
+                  !["xoiche.live", "www.xoiche.live"].includes(parsed.hostname)
+                ) break;
               } catch (_) { break; }
               url = nxt;
             } else break;
@@ -1404,10 +1432,10 @@
       video.load();
 
       const parsed = parseStreamUrl(rawUrl);
-      const url = parsed.url;
+      const url = validateStreamUrl(parsed.url);
       document.getElementById("playerTitle").textContent = title || "Đang phát";
       document.getElementById("openExternal").style.display = "";
-      document.getElementById("openExternal").href = url;
+      document.getElementById("openExternal").href = url || "#";
       document.getElementById("playerOverlay").classList.add("open");
       document.body.classList.add("player-open");
 
@@ -1417,7 +1445,12 @@
         fallback.querySelector("div").textContent = msg;
       };
 
-      // CDN kiểu PhaLang bắt buộc Referer — trình duyệt không cho JS gắn Referer → 403
+      if (!url) {
+        showFail("Link stream không hợp lệ (cần HTTPS .m3u8).");
+        return;
+      }
+
+      // CDN bắt buộc Referer — trình duyệt không cho JS gắn Referer → 403
       if (parsed.needsReferer) {
         showFail("Kênh này chặn xem trên web (cần Referer từ trang gốc). Trình duyệt không gửi được header này nên bị 403. Hãy dùng app IPTV (TiviMate / OTT) hoặc xem trên xoiche khi có BLV.");
         return;
