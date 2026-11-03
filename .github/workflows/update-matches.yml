@@ -477,48 +477,64 @@ jobs:
               else:
                   print("drop url", u[:80])
 
-          # SH-15/SH-23: Quality Gate + last-known-good
+          # SH-15/SH-23: Quality Gate — so sánh cùng loại (streams vs streams)
           MIN_STREAMS = 5
           MIN_RETENTION_RATIO = 0.50
-          prev_count = 0
+          prev_stream_count = 0
+          prev_event_count = 0
           try:
               with open("channels.json", "r", encoding="utf-8") as f:
                   prev = json.load(f)
-              prev_count = int(prev.get("count") or len(prev.get("channels") or prev.get("streams") or []))
+              if isinstance(prev.get("streams"), list):
+                  prev_stream_count = len(prev["streams"])
+              else:
+                  # Migration: snapshot cũ — chỉ đếm URL .m3u8
+                  old = prev.get("channels") or []
+                  prev_stream_count = sum(
+                      1 for c in old
+                      if str((c or {}).get("url") or "").lower().split("?")[0].endswith(".m3u8")
+                  )
+              if isinstance(prev.get("event_links"), list):
+                  prev_event_count = len(prev["event_links"])
           except Exception:
-              prev_count = 0
+              prev_stream_count = 0
+              prev_event_count = 0
 
           status = "updated"
           reason = "ok"
           if len(streams) < MIN_STREAMS:
               status = "skipped_quality_gate"
               reason = "insufficient_valid_streams"
-              print("WARN:", reason, "got", len(streams), "prev", prev_count)
-          elif prev_count and len(streams) < prev_count * MIN_RETENTION_RATIO:
+          elif prev_stream_count and len(streams) < prev_stream_count * MIN_RETENTION_RATIO:
               status = "skipped_quality_gate"
-              reason = "unexpected_channel_count_drop"
-              print("WARN:", reason, "got", len(streams), "prev", prev_count)
+              reason = "unexpected_stream_count_drop"
 
-          # Ghi summary cho Actions (SH-24)
-          with open(os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null"), "a", encoding="utf-8") as sm:
+          print(
+              "gate", status, reason,
+              "streams", len(streams), "prev_streams", prev_stream_count,
+              "events", len(event_links), "prev_events", prev_event_count,
+          )
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY") or "/dev/null"
+          with open(summary_path, "a", encoding="utf-8") as sm:
               sm.write(
-                  f"### Channels quality gate\n"
+                  "### Channels quality gate\n"
                   f"- status: `{status}`\n"
                   f"- reason: `{reason}`\n"
-                  f"- streams: {len(streams)}\n"
-                  f"- event_links: {len(event_links)}\n"
-                  f"- previous_count: {prev_count}\n"
+                  f"- current_stream_count: {len(streams)}\n"
+                  f"- previous_stream_count: {prev_stream_count}\n"
+                  f"- current_event_count: {len(event_links)}\n"
+                  f"- previous_event_count: {prev_event_count}\n"
                   f"- previous_snapshot_preserved: {status != 'updated'}\n"
               )
 
           if status != "updated":
-              # Giữ channels.json cũ — không ghi đè
               raise SystemExit(0)
 
           out = {
               "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "count": len(streams),
-              "channels": streams,  # tương thích frontend cũ
+              "channels": streams,
               "streams": streams,
               "event_links": event_links,
           }
@@ -527,16 +543,29 @@ jobs:
           print("saved", len(streams), "streams,", len(event_links), "event_links")
           PY
 
-      # SH-25: chỉ commit khi các step trước success (không always)
+      # Commit độc lập theo file đã đổi (matches / channels có thể cập nhật riêng)
       - name: Commit data files
-        if: success()
+        if: always()
         run: |
           git config user.name "SportsH Bot"
           git config user.email "bot@sportsh.local"
-          git add matches.json channels.json
-          if git diff --staged --quiet; then
-            echo "No changes"
+          CHANGED=""
+          if git diff --quiet matches.json 2>/dev/null; then
+            true
           else
-            git commit -m "chore: update matches.json and channels.json"
-            git push
+            git add matches.json
+            CHANGED="$CHANGED matches"
           fi
+          if git diff --quiet channels.json 2>/dev/null; then
+            true
+          else
+            git add channels.json
+            CHANGED="$CHANGED channels"
+          fi
+          if [ -z "$CHANGED" ]; then
+            echo "No data file changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: update$CHANGED"
+          git push
+          echo "Committed:$CHANGED"
