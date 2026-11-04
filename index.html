@@ -125,24 +125,28 @@
     }
     .filter-section-label:first-child { margin-top: 0; }
     .search-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
       align-items: center;
-      margin-top: 8px;
+      margin-top: 10px;
     }
-    .search-row .search-wrap { flex: 1 1 200px; margin: 0; }
+    @media (max-width: 640px) {
+      .search-row { grid-template-columns: 1fr; }
+    }
+    .search-row .search-wrap { margin: 0; width: 100%; }
     .filter-tools {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
       align-items: center;
+      justify-content: flex-end;
     }
     .chip-toggle {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 8px 12px;
+      padding: 10px 14px;
       border-radius: 999px;
       border: 1px solid rgba(255,255,255,.1);
       background: rgba(255,255,255,.04);
@@ -152,6 +156,8 @@
       cursor: pointer;
       user-select: none;
       white-space: nowrap;
+      height: 42px;
+      box-sizing: border-box;
     }
     .chip-toggle.active {
       background: rgba(34,197,94,.15);
@@ -875,7 +881,7 @@
       <div class="filter-tools">
         <label class="chip-toggle" id="toggleHasLink" title="Chỉ hiện trận bấm xem được (ẩn NO LINK)">
           <input type="checkbox" id="onlyHasLink" />
-          Chỉ có link
+          Chỉ trận có link
         </label>
       </div>
     </div>
@@ -938,11 +944,11 @@
     let hls = null;
     let refreshTimer = null;
 
+    /** Chỉ trả site xem được trên trình duyệt; nguồn chỉ có M3U (Giờ Vàng…) → null */
     function originSiteFor(m) {
       const src = (m && m._source) || "xoiche";
       if (src === "gavang") return { label: "Gà Vàng", url: "https://gavang1.xyz/" };
       if (src === "cola") return { label: "Cola", url: "https://colatv.watch/" };
-      if (src === "giovang") return { label: "Giờ Vàng", url: "https://bongda-1.onrender.com/" };
       if (src === "xoiche") {
         const id = m && m.id;
         return {
@@ -952,7 +958,8 @@
             : "https://xoiche.live/"
         };
       }
-      return { label: "Nguồn gốc", url: "https://xoiche.live/" };
+      // giovang / phalang / … — không có trang xem online ổn định
+      return null;
     }
 
     async function fetchSameOriginJson(path) {
@@ -1234,7 +1241,7 @@
         home_score: 0,
         away_score: 0,
         match_time: timeLabel,
-        tournament_name: (league && league !== srcLabel) ? league : srcLabel,
+        tournament_name: (league && league !== srcLabel) ? league : "Thể thao",
         sport_slug,
         sport_name: sport_slug,
         primary_stream_url: ch.url,
@@ -1304,11 +1311,17 @@
         allMatches = liveSoon.concat(extra).concat(done);
 
         const now = new Date();
-        updatedAt.textContent = "Cập nhật " + now.toLocaleTimeString("vi-VN") + " · " + (source || "api");
+        const dateStr = now.toLocaleDateString("vi-VN", {
+          weekday: "short", day: "2-digit", month: "2-digit", year: "numeric"
+        });
+        const timeStr = now.toLocaleTimeString("vi-VN", {
+          hour: "2-digit", minute: "2-digit", second: "2-digit"
+        });
+        updatedAt.textContent = dateStr + " · Cập nhật " + timeStr;
         const liveCount = allMatches.filter(m => classify(m) === "live").length;
         const withLink = allMatches.filter(hasWatchableStream).length;
         statusText.textContent =
-          "v" + APP_VERSION + " · " + allMatches.length + " trận · " +
+          allMatches.length + " trận · " +
           liveCount + " live · " + withLink + " có link · " + extra.length + " nguồn phụ";
         liveDot.style.display = liveCount ? "inline-block" : "none";
 
@@ -1541,12 +1554,15 @@
         } else {
           clock = m.match_time ? String(m.match_time) : "";
         }
-        let league = m.tournament?.name || m.tournament_name || m.sport?.name || m.sport_name || "Thể thao";
-        const src = m._source || "xoiche";
-        if (src && src !== "xoiche") {
-          const srcLabel = SRC_LABELS[src] || src;
-          league = srcLabel + (league ? " · " + league : "");
+        let league = m.tournament?.name || m.tournament_name || m.sport?.name || m.sport_name || "";
+        const srcLabelClean = SRC_LABELS[m._source || ""] || "";
+        // Bỏ trùng tên nguồn trong title (vd. "Gà Vàng · … · Gà Vàng")
+        if (league && srcLabelClean) {
+          const parts = league.split("·").map(s => s.trim()).filter(Boolean);
+          const filtered = parts.filter(p => p.toLowerCase() !== srcLabelClean.toLowerCase());
+          league = filtered.join(" · ") || league;
         }
+        if (!league) league = "Thể thao";
         const logoHome = absUrl(m.home_team?.logo || m.home_team_logo);
         const logoAway = absUrl(m.away_team?.logo || m.away_team_logo);
         const thumb = absUrl(m.thumbnail);
@@ -1596,8 +1612,9 @@
           ? "NO LINK"
           : (streams.length > 1 ? "Chọn BLV (" + streams.length + ")" : "Xem ngay");
         const origin = originSiteFor(m);
-        const srcLabel = SRC_LABELS[m._source || "xoiche"] || (m._source || "");
-        const originHtml = `<a class="ext-link" href="${esc(origin.url)}" target="_blank" rel="noopener" data-ext="1" title="Mở trên ${esc(origin.label)}">↗ ${esc(origin.label)}</a>`;
+        const originHtml = origin
+          ? `<a class="ext-link" href="${esc(origin.url)}" target="_blank" rel="noopener" data-ext="1" title="Xem trên ${esc(origin.label)}">↗ ${esc(origin.label)}</a>`
+          : "";
 
         const card = document.createElement("div");
         card.className = "card" + (cat === "live" ? " live" : "") + (hasLink ? "" : " no-stream");
@@ -1606,7 +1623,7 @@
         const safeAwayLogo = safeUrl(logoAway || (!m._external ? thumb : ""));
         card.innerHTML = `
           <div class="card-top">
-            <div class="league" title="${esc(league)}">${esc(league)} <span class="src-tag">· ${esc(srcLabel)}</span></div>
+            <div class="league" title="${esc(league)}">${esc(league)}</div>
             <div class="badge ${cat}">${statusBadge}</div>
           </div>
           <div class="teams">
@@ -1763,11 +1780,17 @@
         video.style.display = "none";
         fallback.style.display = "flex";
         fallback.querySelector("div").textContent =
-          "Trận này chưa có link xem trên SportsH. Hãy mở site gốc.";
+          origin
+            ? "Trận này chưa có link xem trên SportsH. Hãy mở site gốc."
+            : "Trận này chưa có link xem trên SportsH.";
         const ext = document.getElementById("openExternal");
-        ext.style.display = "";
-        ext.href = origin.url;
-        ext.textContent = "Mở trên " + origin.label;
+        if (origin) {
+          ext.style.display = "";
+          ext.href = origin.url;
+          ext.textContent = "Mở trên " + origin.label;
+        } else {
+          ext.style.display = "none";
+        }
         document.getElementById("playerTitle").textContent = matchTitle;
         return;
       }
