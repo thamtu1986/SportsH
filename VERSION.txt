@@ -1,0 +1,10 @@
+SportsH v2.0.0
+- Badge v2 + footer
+- Toggle: Chỉ trận có link
+- Toggle: Ẩn đã kết thúc (tab Tất cả)
+- Deep link site gốc trên mỗi thẻ (Xoiche / Gà Vàng / Cola / ...)
+- Fallback player → mở site gốc khi NO LINK
+- Click ↗ không kích hoạt player
+- Empty state gợi ý tab/filter
+- Parser Gà Vàng homeTeam.name (workflow)
+- Auto chuyển Sắp diễn ra khi nguồn 0 live

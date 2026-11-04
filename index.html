@@ -88,6 +88,62 @@
       user-select: none;
     }
     .brand:hover { opacity: 0.9; }
+    .brand-ver {
+      font-size: .65rem;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(34,197,94,.15);
+      color: #4ade80;
+      border: 1px solid rgba(34,197,94,.35);
+      margin-left: 6px;
+      letter-spacing: .04em;
+    }
+    .filter-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .chip-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.1);
+      background: rgba(255,255,255,.04);
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+    }
+    .chip-toggle.active {
+      background: rgba(34,197,94,.15);
+      border-color: rgba(34,197,94,.4);
+      color: #86efac;
+    }
+    .chip-toggle input { display: none; }
+    .ext-link {
+      font-size: .72rem;
+      font-weight: 600;
+      color: #7dd3fc;
+      text-decoration: none;
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(125,211,252,.25);
+      background: rgba(0,176,255,.08);
+      white-space: nowrap;
+    }
+    .ext-link:hover { background: rgba(0,176,255,.16); }
+    .src-tag {
+      font-size: .68rem;
+      font-weight: 600;
+      color: var(--muted);
+      opacity: .9;
+    }
     .brand-badge {
       width: 34px;
       height: 34px;
@@ -735,6 +791,7 @@
       <div class="brand" id="brandHome" title="Về trang chủ">
         <div class="brand-badge">⚽</div>
         <span>SportsH</span>
+        <span class="brand-ver">v2</span>
       </div>
       <div class="header-actions">
         <button class="icon-btn" id="btnRefresh" title="Làm mới">⟳</button>
@@ -766,6 +823,16 @@
     <div class="search-wrap">
       <input class="search" id="search" type="search" placeholder="Tìm đội, giải đấu, BLV..." />
     </div>
+    <div class="filter-tools">
+      <label class="chip-toggle" id="toggleHasLink">
+        <input type="checkbox" id="onlyHasLink" />
+        Chỉ trận có link
+      </label>
+      <label class="chip-toggle" id="toggleHideFinished">
+        <input type="checkbox" id="hideFinished" checked />
+        Ẩn đã kết thúc (tab Tất cả)
+      </label>
+    </div>
   </div>
 
   <main class="main">
@@ -777,7 +844,7 @@
     <div class="state" id="state"></div>
   </main>
 
-  <div class="footer">SportsH · Tự động cập nhật trận đấu</div>
+  <div class="footer">SportsH v2 · Nguồn tổng hợp · Một số kênh chỉ xem được trên site gốc</div>
 
   <div class="player-overlay" id="playerOverlay">
     <div class="player-bar">
@@ -815,12 +882,32 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
+    const APP_VERSION = "2.0.0";
     let allMatches = [];
     let currentTab = "live";
     let currentSport = "all";
     let currentSource = "all";
+    let onlyHasLink = false;
+    let hideFinishedOnAll = true;
     let hls = null;
     let refreshTimer = null;
+
+    function originSiteFor(m) {
+      const src = (m && m._source) || "xoiche";
+      if (src === "gavang") return { label: "Gà Vàng", url: "https://gavang1.xyz/" };
+      if (src === "cola") return { label: "Cola", url: "https://colatv.watch/" };
+      if (src === "giovang") return { label: "Giờ Vàng", url: "https://bongda-1.onrender.com/" };
+      if (src === "xoiche") {
+        const id = m && m.id;
+        return {
+          label: "Xoiche",
+          url: id && !String(id).startsWith("ch-")
+            ? ("https://xoiche.live/match/" + id)
+            : "https://xoiche.live/"
+        };
+      }
+      return { label: "Nguồn gốc", url: "https://xoiche.live/" };
+    }
 
     async function fetchSameOriginJson(path) {
       try {
@@ -1028,7 +1115,7 @@
     function channelToMatch(ch, idx) {
       // Tên dạng: "15:30 - 02/11 | Team A VS Team B (League) | BLV"
       const name = ch.name || "Kênh";
-      let home = name;
+      let home = "";
       let away = "";
       let league = ch.group || "";
       let blv = "";
@@ -1048,12 +1135,18 @@
           home = mid;
         }
         if (parts[2]) blv = parts[2];
+      } else {
+        // fallback: cả chuỗi là tên
+        home = name;
       }
+      // Bỏ bản ghi parse hỏng (tên đội trống / ?)
+      if (!home || home === "?" || home === "Kênh") return null;
+
       const src = (ch.source || "other").toLowerCase();
       const srcLabel = SRC_LABELS[src] || src;
-      // Ước lượng trạng thái theo GIỜ + NGÀY trong tên (vd: "15:30 - 04/11")
       let status = "scheduled";
       const now = new Date();
+      let startIso = null;
       const tm = timeLabel.match(/(\d{1,2}):(\d{2})/);
       const dm = timeLabel.match(/(\d{1,2})\/(\d{1,2})/);
       if (tm) {
@@ -1062,20 +1155,20 @@
         const start = new Date(now);
         if (dm) {
           const day = parseInt(dm[1], 10);
-          const month = parseInt(dm[2], 10) - 1; // 0-indexed
+          const month = parseInt(dm[2], 10) - 1;
           let year = now.getFullYear();
           start.setFullYear(year, month, day);
           start.setHours(hh, mm, 0, 0);
-          // Nếu lệch > 180 ngày so với hiện tại, chỉnh năm gần nhất
           if (start - now > 180 * 864e5) start.setFullYear(year - 1);
           if (now - start > 180 * 864e5) start.setFullYear(year + 1);
         } else {
           start.setHours(hh, mm, 0, 0);
         }
+        startIso = start.toISOString();
         const diffMin = (now - start) / 60000;
         if (diffMin >= -20 && diffMin <= 150) status = "live";
         else if (diffMin > 150) status = "finished";
-        else status = "scheduled"; // ngày/giờ trong tương lai
+        else status = "scheduled";
       }
       const low = name.toLowerCase();
       let sport_slug = "football";
@@ -1089,17 +1182,19 @@
         _source: src,
         status,
         home_team_name: home,
-        away_team_name: away || srcLabel,
+        away_team_name: away || "—",
+        home_team_logo: ch.logo || "",
+        away_team_logo: "",
         home_score: 0,
         away_score: 0,
         match_time: timeLabel,
-        tournament_name: league || srcLabel,
+        tournament_name: (league && league !== srcLabel) ? league : srcLabel,
         sport_slug,
         sport_name: sport_slug,
         primary_stream_url: ch.url,
         commentators: blv ? [{ name: blv, stream_url: ch.url }] : [{ name: srcLabel, stream_url: ch.url }],
         views_count: 0,
-        start_time: null
+        start_time: startIso
       };
     }
 
@@ -1157,7 +1252,7 @@
         let extra = [];
         try {
           const chs = await fetchLocalChannels();
-          extra = chs.map((ch, i) => channelToMatch(ch, i));
+          extra = chs.map((ch, i) => channelToMatch(ch, i)).filter(Boolean);
         } catch (_) {}
 
         allMatches = liveSoon.concat(extra).concat(done);
@@ -1165,7 +1260,10 @@
         const now = new Date();
         updatedAt.textContent = "Cập nhật " + now.toLocaleTimeString("vi-VN") + " · " + (source || "api");
         const liveCount = allMatches.filter(m => classify(m) === "live").length;
-        statusText.textContent = allMatches.length + " trận · " + liveCount + " live · " + extra.length + " nguồn phụ";
+        const withLink = allMatches.filter(hasWatchableStream).length;
+        statusText.textContent =
+          "v" + APP_VERSION + " · " + allMatches.length + " trận · " +
+          liveCount + " live · " + withLink + " có link · " + extra.length + " nguồn phụ";
         liveDot.style.display = liveCount ? "inline-block" : "none";
 
         updateSportTabs();
@@ -1273,12 +1371,17 @@
       updateSourceTabs();
     }
 
-    /** Ẩn tab nguồn không có trận; nếu đang chọn nguồn rỗng → về Mọi nguồn */
+    /** Ẩn tab nguồn không còn trận; khi chọn nguồn mà tab trạng thái đang 0 → chuyển Sắp diễn ra */
     function updateSourceTabs() {
       const counts = {};
+      const liveCounts = {};
+      const soonCounts = {};
       allMatches.forEach(m => {
         const s = m._source || "xoiche";
         counts[s] = (counts[s] || 0) + 1;
+        const c = classify(m);
+        if (c === "live") liveCounts[s] = (liveCounts[s] || 0) + 1;
+        if (c === "soon") soonCounts[s] = (soonCounts[s] || 0) + 1;
       });
       let activeGone = false;
       document.querySelectorAll("#sourceTabs .tab").forEach(btn => {
@@ -1297,6 +1400,17 @@
           t.classList.toggle("active", t.dataset.source === "all");
         });
       }
+      // Nguồn phụ hay chỉ còn "sắp" — tránh đứng tab LIVE với 0 trận
+      if (currentSource !== "all" && currentTab === "live") {
+        const liveN = liveCounts[currentSource] || 0;
+        const soonN = soonCounts[currentSource] || 0;
+        if (liveN === 0 && soonN > 0) {
+          currentTab = "soon";
+          document.querySelectorAll("[data-tab]").forEach(t => {
+            t.classList.toggle("active", t.dataset.tab === "soon");
+          });
+        }
+      }
     }
 
     function filtered() {
@@ -1304,14 +1418,17 @@
       return allMatches.filter(m => {
         const cat = classify(m);
         if (currentTab !== "all" && cat !== currentTab) return false;
+        if (currentTab === "all" && hideFinishedOnAll && cat === "done") return false;
         if (currentSport !== "all" && sportSlug(m) !== currentSport) return false;
         if (currentSource !== "all" && (m._source || "xoiche") !== currentSource) return false;
+        if (onlyHasLink && !hasWatchableStream(m)) return false;
         if (!q) return true;
         const home = m.home_team?.name || m.home_team_name || "";
         const away = m.away_team?.name || m.away_team_name || "";
         const tour = m.tournament?.name || m.tournament_name || "";
         const blv = (m.commentators || []).map(c => c.name || "").join(" ");
-        return (home + " " + away + " " + tour + " " + blv).toLowerCase().includes(q);
+        const src = m._source || "";
+        return (home + " " + away + " " + tour + " " + blv + " " + src).toLowerCase().includes(q);
       });
     }
 
@@ -1344,9 +1461,16 @@
       grid.innerHTML = "";
       if (!list.length) {
         state.style.display = "block";
-        state.innerHTML = allMatches.length
-          ? "Không có trận phù hợp."
-          : `<div class="spinner"></div>Đang tải...`;
+        let tip = "Không có trận phù hợp.";
+        if (allMatches.length) {
+          if (onlyHasLink) tip += " Thử tắt «Chỉ trận có link».";
+          if (currentSource !== "all" && currentTab === "live") {
+            tip += " Nguồn này có thể không còn trận LIVE — xem tab «Sắp diễn ra».";
+          }
+        } else {
+          tip = `<div class="spinner"></div>Đang tải...`;
+        }
+        state.innerHTML = tip;
         return;
       }
       state.style.display = "none";
@@ -1425,6 +1549,9 @@
         const watchLabel = !hasLink
           ? "NO LINK"
           : (streams.length > 1 ? "Chọn BLV (" + streams.length + ")" : "Xem ngay");
+        const origin = originSiteFor(m);
+        const srcLabel = SRC_LABELS[m._source || "xoiche"] || (m._source || "");
+        const originHtml = `<a class="ext-link" href="${esc(origin.url)}" target="_blank" rel="noopener" data-ext="1" title="Mở trên ${esc(origin.label)}">↗ ${esc(origin.label)}</a>`;
 
         const card = document.createElement("div");
         card.className = "card" + (cat === "live" ? " live" : "") + (hasLink ? "" : " no-stream");
@@ -1433,7 +1560,7 @@
         const safeAwayLogo = safeUrl(logoAway || (!m._external ? thumb : ""));
         card.innerHTML = `
           <div class="card-top">
-            <div class="league" title="${esc(league)}">${esc(league)}</div>
+            <div class="league" title="${esc(league)}">${esc(league)} <span class="src-tag">· ${esc(srcLabel)}</span></div>
             <div class="badge ${cat}">${statusBadge}</div>
           </div>
           <div class="teams">
@@ -1455,15 +1582,24 @@
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               <button class="watch-btn${hasLink ? "" : " no-link"}" type="button" ${hasLink ? "" : "disabled"}>${watchLabel}</button>
               ${hasLink ? qualityHtml : ""}
+              ${originHtml}
             </div>
             <div class="views">${m.views_count ? (esc(m.views_count) + " xem") : ""}</div>
           </div>
         `;
         if (hasLink) {
           const open = () => openPlayer(m);
-          card.addEventListener("click", open);
+          card.addEventListener("click", (e) => {
+            if (e.target.closest("[data-ext]")) return; // link site gốc
+            open();
+          });
           card.addEventListener("keydown", e => {
             if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+          });
+        } else {
+          // Không có link: chỉ mở site gốc khi bấm ↗
+          card.addEventListener("click", (e) => {
+            if (e.target.closest("[data-ext]")) return;
           });
         }
         frag.appendChild(card);
@@ -1577,10 +1713,15 @@
       }
 
       if (!streams.length) {
+        const origin = originSiteFor(m);
         video.style.display = "none";
         fallback.style.display = "flex";
-        fallback.querySelector("div").textContent = "Trận này chưa có link xem.";
-        document.getElementById("openExternal").style.display = "none";
+        fallback.querySelector("div").textContent =
+          "Trận này chưa có link xem trên SportsH. Hãy mở site gốc.";
+        const ext = document.getElementById("openExternal");
+        ext.style.display = "";
+        ext.href = origin.url;
+        ext.textContent = "Mở trên " + origin.label;
         document.getElementById("playerTitle").textContent = matchTitle;
         return;
       }
@@ -1677,9 +1818,42 @@
       document.querySelectorAll("#sourceTabs .tab").forEach(t => t.classList.remove("active"));
       btn.classList.add("active");
       currentSource = btn.dataset.source || "all";
+      // Nếu nguồn không có trận LIVE nhưng có Sắp diễn ra → chuyển tab
+      if (currentSource !== "all" && currentTab === "live") {
+        const liveN = allMatches.filter(m => (m._source || "xoiche") === currentSource && classify(m) === "live").length;
+        const soonN = allMatches.filter(m => (m._source || "xoiche") === currentSource && classify(m) === "soon").length;
+        if (liveN === 0 && soonN > 0) {
+          currentTab = "soon";
+          document.querySelectorAll("[data-tab]").forEach(t => {
+            t.classList.toggle("active", t.dataset.tab === "soon");
+          });
+        }
+      }
       updateCounts();
       render();
     });
+    const onlyHasLinkEl = document.getElementById("onlyHasLink");
+    const hideFinishedEl = document.getElementById("hideFinished");
+    const toggleHasLink = document.getElementById("toggleHasLink");
+    const toggleHideFinished = document.getElementById("toggleHideFinished");
+    if (onlyHasLinkEl) {
+      onlyHasLinkEl.addEventListener("change", () => {
+        onlyHasLink = !!onlyHasLinkEl.checked;
+        toggleHasLink.classList.toggle("active", onlyHasLink);
+        updateCounts();
+        render();
+      });
+    }
+    if (hideFinishedEl) {
+      hideFinishedEl.addEventListener("change", () => {
+        hideFinishedOnAll = !!hideFinishedEl.checked;
+        toggleHideFinished.classList.toggle("active", hideFinishedOnAll);
+        updateCounts();
+        render();
+      });
+      toggleHideFinished.classList.add("active");
+    }
+
     document.getElementById("btnRefresh").addEventListener("click", fetchMatches);
     document.getElementById("btnClosePlayer").addEventListener("click", backFromPlayer);
     document.getElementById("btnFabBack").addEventListener("click", backFromPlayer);
