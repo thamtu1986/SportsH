@@ -848,41 +848,34 @@
   </header>
 
   <div class="filter-bar" id="filterBar">
-    <div class="filter-section-label">Môn thể thao</div>
     <div class="tabs sports" id="sportTabs">
       <button class="tab sport-tab active" data-sport="all">Tất cả</button>
     </div>
-    <div class="filter-section-label">Trạng thái</div>
     <div class="tabs" id="tabs">
-      <button class="tab active" data-tab="live">🔴 Đang diễn ra <span class="count" id="cLive">0</span></button>
-      <button class="tab" data-tab="soon">🟢 Sắp diễn ra <span class="count" id="cSoon">0</span></button>
-      <button class="tab" data-tab="done">⚫ Đã kết thúc <span class="count" id="cDone">0</span></button>
-      <button class="tab" data-tab="all">📋 Tất cả <span class="count" id="cAll">0</span></button>
+      <button class="tab active" data-tab="live">Đang diễn ra <span class="count" id="cLive">0</span></button>
+      <button class="tab" data-tab="soon">Sắp diễn ra <span class="count" id="cSoon">0</span></button>
+      <button class="tab" data-tab="done">Đã kết thúc <span class="count" id="cDone">0</span></button>
+      <button class="tab" data-tab="all">Tất cả <span class="count" id="cAll">0</span></button>
     </div>
-    <div class="filter-section-label">Nguồn</div>
     <div class="tabs" id="sourceTabs">
-      <button class="tab active" data-source="all">✨ Mọi nguồn</button>
-      <button class="tab" data-source="xoiche">📺 Xoiche</button>
-      <button class="tab" data-source="giovang">🥇 Giờ Vàng</button>
-      <button class="tab" data-source="gavang">🐔 Gà Vàng</button>
-      <button class="tab" data-source="cola">🥤 Cola</button>
-      <button class="tab" data-source="phalang">⚔️ PhaLang</button>
-      <button class="tab" data-source="hoiquan">🏠 Hội Quán</button>
-      <button class="tab" data-source="thiendinh">⚡ Thiên Đình</button>
-      <button class="tab" data-source="vongcam">🚧 Vòng Cấm</button>
+      <button class="tab active" data-source="all">Mọi nguồn</button>
+      <button class="tab" data-source="xoiche">Xoiche</button>
+      <button class="tab" data-source="giovang">Giờ Vàng</button>
+      <button class="tab" data-source="gavang">Gà Vàng</button>
+      <button class="tab" data-source="cola">Cola</button>
+      <button class="tab" data-source="phalang">PhaLang</button>
+      <button class="tab" data-source="hoiquan">Hội Quán</button>
+      <button class="tab" data-source="thiendinh">Thiên Đình</button>
+      <button class="tab" data-source="vongcam">Vòng Cấm</button>
     </div>
     <div class="search-row">
       <div class="search-wrap">
         <input class="search" id="search" type="search" placeholder="Tìm đội, giải, BLV..." autocomplete="off" />
       </div>
       <div class="filter-tools">
-        <label class="chip-toggle" id="toggleHasLink" title="Chỉ hiện trận có link phát">
+        <label class="chip-toggle" id="toggleHasLink" title="Chỉ hiện trận bấm xem được (ẩn NO LINK)">
           <input type="checkbox" id="onlyHasLink" />
-          Có link
-        </label>
-        <label class="chip-toggle active" id="toggleHideFinished" title="Ẩn trận đã kết thúc khi xem Tất cả">
-          <input type="checkbox" id="hideFinished" checked />
-          Ẩn hết giờ
+          Chỉ có link
         </label>
       </div>
     </div>
@@ -941,7 +934,7 @@
     let currentSport = "all";
     let currentSource = "all";
     let onlyHasLink = false;
-    let hideFinishedOnAll = true;
+    let hideFinishedOnAll = false;
     let hls = null;
     let refreshTimer = null;
 
@@ -1886,9 +1879,7 @@
       render();
     });
     const onlyHasLinkEl = document.getElementById("onlyHasLink");
-    const hideFinishedEl = document.getElementById("hideFinished");
     const toggleHasLink = document.getElementById("toggleHasLink");
-    const toggleHideFinished = document.getElementById("toggleHideFinished");
     if (onlyHasLinkEl) {
       onlyHasLinkEl.addEventListener("change", () => {
         onlyHasLink = !!onlyHasLinkEl.checked;
@@ -1896,15 +1887,6 @@
         updateCounts();
         render();
       });
-    }
-    if (hideFinishedEl) {
-      hideFinishedEl.addEventListener("change", () => {
-        hideFinishedOnAll = !!hideFinishedEl.checked;
-        toggleHideFinished.classList.toggle("active", hideFinishedOnAll);
-        updateCounts();
-        render();
-      });
-      toggleHideFinished.classList.add("active");
     }
 
     document.getElementById("btnRefresh").addEventListener("click", fetchMatches);
