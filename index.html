@@ -443,6 +443,22 @@
       font-size: .82rem;
       cursor: pointer;
     }
+    .watch-btn.no-link {
+      background: rgba(148,163,184,.18);
+      color: #94a3b8;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .badge.nolink {
+      background: rgba(148,163,184,.2);
+      color: #cbd5e1;
+      border: 1px solid rgba(148,163,184,.35);
+      font-size: .65rem;
+      letter-spacing: .04em;
+    }
+    .card.no-stream {
+      opacity: .88;
+    }
     .views { font-size: .75rem; color: var(--muted); }
     .blv-row {
       margin-top: 10px;
@@ -1363,21 +1379,32 @@
           return `<div class="team-avatar">${ini}</div>`;
         };
         const streams = getStreams(m);
-        const blvHtml = streams.length
+        const hasLink = streams.length > 0;
+        const blvHtml = hasLink
           ? `<div class="blv-row">${streams.slice(0, 3).map(s =>
               `<span class="blv-chip" title="${esc(s.name)}">${esc(s.name)}</span>`
             ).join("")}${streams.length > 3 ? `<span class="blv-chip more">+${streams.length - 3}</span>` : ""}</div>`
           : "";
+        const statusBadge = cat === "live" ? "LIVE" : cat === "soon" ? "SẮP TỚI" : "HẾT";
+        const linkBadge = hasLink
+          ? ""
+          : `<span class="badge nolink" title="Chưa có link phát">NO LINK</span>`;
+        const watchLabel = !hasLink
+          ? "NO LINK"
+          : (streams.length > 1 ? "Chọn BLV (" + streams.length + ")" : "Xem ngay");
 
         const card = document.createElement("div");
-        card.className = "card" + (cat === "live" ? " live" : "");
-        card.tabIndex = 0;
+        card.className = "card" + (cat === "live" ? " live" : "") + (hasLink ? "" : " no-stream");
+        if (hasLink) card.tabIndex = 0;
         const safeHomeLogo = safeUrl(logoHome || (!m._external ? thumb : ""));
         const safeAwayLogo = safeUrl(logoAway || (!m._external ? thumb : ""));
         card.innerHTML = `
           <div class="card-top">
             <div class="league" title="${esc(league)}">${esc(league)}</div>
-            <div class="badge ${cat}">${cat === "live" ? "LIVE" : cat === "soon" ? "SẮP TỚI" : "HẾT"}</div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+              ${linkBadge}
+              <div class="badge ${cat}">${statusBadge}</div>
+            </div>
           </div>
           <div class="teams">
             <div class="team">
@@ -1395,13 +1422,17 @@
           </div>
           ${blvHtml}
           <div class="card-bottom">
-            <button class="watch-btn">${streams.length > 1 ? "Chọn BLV (" + streams.length + ")" : "Xem ngay"}</button>
+            <button class="watch-btn${hasLink ? "" : " no-link"}" type="button" ${hasLink ? "" : "disabled"}>${watchLabel}</button>
             <div class="views">${m.views_count ? (esc(m.views_count) + " xem") : ""}</div>
           </div>
         `;
-        const open = () => openPlayer(m);
-        card.addEventListener("click", open);
-        card.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+        if (hasLink) {
+          const open = () => openPlayer(m);
+          card.addEventListener("click", open);
+          card.addEventListener("keydown", e => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+          });
+        }
         frag.appendChild(card);
       });
       grid.appendChild(frag);
