@@ -88,29 +88,61 @@
       user-select: none;
     }
     .brand:hover { opacity: 0.9; }
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      flex-shrink: 0;
+      box-shadow: 0 4px 14px rgba(0,200,120,.25);
+    }
+    .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+    .brand-text strong { font-size: 1.15rem; }
+    .brand-text small {
+      font-size: .68rem;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: .02em;
+    }
     .brand-ver {
-      font-size: .65rem;
+      font-size: .62rem;
       font-weight: 700;
       padding: 2px 7px;
       border-radius: 999px;
       background: rgba(34,197,94,.15);
       color: #4ade80;
       border: 1px solid rgba(34,197,94,.35);
-      margin-left: 6px;
       letter-spacing: .04em;
+      align-self: flex-start;
+      margin-top: 2px;
     }
-    .filter-tools {
+    .filter-section-label {
+      font-size: .68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #5d6b7c;
+      margin: 10px 0 6px;
+    }
+    .filter-section-label:first-child { margin-top: 0; }
+    .search-row {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
       margin-top: 8px;
     }
+    .search-row .search-wrap { flex: 1 1 200px; margin: 0; }
+    .filter-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
     .chip-toggle {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 12px;
+      padding: 8px 12px;
       border-radius: 999px;
       border: 1px solid rgba(255,255,255,.1);
       background: rgba(255,255,255,.04);
@@ -119,6 +151,7 @@
       font-weight: 600;
       cursor: pointer;
       user-select: none;
+      white-space: nowrap;
     }
     .chip-toggle.active {
       background: rgba(34,197,94,.15);
@@ -789,8 +822,23 @@
   <header class="header">
     <div class="header-inner">
       <div class="brand" id="brandHome" title="Về trang chủ">
-        <div class="brand-badge">⚽</div>
-        <span>SportsH</span>
+        <svg class="brand-logo" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#22c55e"/>
+              <stop offset="100%" stop-color="#06b6d4"/>
+            </linearGradient>
+          </defs>
+          <rect width="64" height="64" rx="16" fill="url(#g1)"/>
+          <circle cx="32" cy="32" r="16" fill="none" stroke="#04120a" stroke-width="3"/>
+          <path d="M32 16v32M16 32h32" stroke="#04120a" stroke-width="2.2" opacity=".35"/>
+          <path d="M22 22c6 4 14 4 20 0M22 42c6-4 14-4 20 0" fill="none" stroke="#04120a" stroke-width="2"/>
+          <circle cx="32" cy="32" r="3.5" fill="#04120a"/>
+        </svg>
+        <div class="brand-text">
+          <strong>SportsH</strong>
+          <small>Trực tiếp thể thao</small>
+        </div>
         <span class="brand-ver">v2</span>
       </div>
       <div class="header-actions">
@@ -800,15 +848,18 @@
   </header>
 
   <div class="filter-bar" id="filterBar">
+    <div class="filter-section-label">Môn thể thao</div>
     <div class="tabs sports" id="sportTabs">
       <button class="tab sport-tab active" data-sport="all">Tất cả</button>
     </div>
+    <div class="filter-section-label">Trạng thái</div>
     <div class="tabs" id="tabs">
       <button class="tab active" data-tab="live">🔴 Đang diễn ra <span class="count" id="cLive">0</span></button>
       <button class="tab" data-tab="soon">🟢 Sắp diễn ra <span class="count" id="cSoon">0</span></button>
       <button class="tab" data-tab="done">⚫ Đã kết thúc <span class="count" id="cDone">0</span></button>
-      <button class="tab" data-tab="all">📋 Tất cả trận <span class="count" id="cAll">0</span></button>
+      <button class="tab" data-tab="all">📋 Tất cả <span class="count" id="cAll">0</span></button>
     </div>
+    <div class="filter-section-label">Nguồn</div>
     <div class="tabs" id="sourceTabs">
       <button class="tab active" data-source="all">✨ Mọi nguồn</button>
       <button class="tab" data-source="xoiche">📺 Xoiche</button>
@@ -820,18 +871,20 @@
       <button class="tab" data-source="thiendinh">⚡ Thiên Đình</button>
       <button class="tab" data-source="vongcam">🚧 Vòng Cấm</button>
     </div>
-    <div class="search-wrap">
-      <input class="search" id="search" type="search" placeholder="Tìm đội, giải đấu, BLV..." />
-    </div>
-    <div class="filter-tools">
-      <label class="chip-toggle" id="toggleHasLink">
-        <input type="checkbox" id="onlyHasLink" />
-        Chỉ trận có link
-      </label>
-      <label class="chip-toggle" id="toggleHideFinished">
-        <input type="checkbox" id="hideFinished" checked />
-        Ẩn đã kết thúc (tab Tất cả)
-      </label>
+    <div class="search-row">
+      <div class="search-wrap">
+        <input class="search" id="search" type="search" placeholder="Tìm đội, giải, BLV..." autocomplete="off" />
+      </div>
+      <div class="filter-tools">
+        <label class="chip-toggle" id="toggleHasLink" title="Chỉ hiện trận có link phát">
+          <input type="checkbox" id="onlyHasLink" />
+          Có link
+        </label>
+        <label class="chip-toggle active" id="toggleHideFinished" title="Ẩn trận đã kết thúc khi xem Tất cả">
+          <input type="checkbox" id="hideFinished" checked />
+          Ẩn hết giờ
+        </label>
+      </div>
     </div>
   </div>
 
