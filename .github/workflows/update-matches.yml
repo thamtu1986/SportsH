@@ -359,22 +359,48 @@ jobs:
               for item in items:
                   if not isinstance(item, dict):
                       continue
-                  home = item.get("homeTeamName") or item.get("home_name") or "?"
-                  away = item.get("awayTeamName") or item.get("away_name") or "?"
-                  logo = item.get("homeTeamLogo") or item.get("home_logo") or ""
-                  league = item.get("leagueName") or item.get("tournamentName") or label
-                  # thời gian
-                  time_label = ""
-                  ts = item.get("matchTime") or item.get("startTime")
-                  if isinstance(ts, (int, float)) and ts > 1e9:
-                      try:
-                          tsv = ts if ts < 1e12 else ts / 1000
-                          time_label = datetime.fromtimestamp(tsv).strftime("%H:%M - %d/%m")
-                      except Exception:
-                          pass
-                  # status
-                  st = item.get("matchStatus") or item.get("status")
-                  st_s = str(st).lower()
+                  # API Gà Vàng: homeTeam/awayTeam là object {name, logo}
+                  ht = item.get("homeTeam") if isinstance(item.get("homeTeam"), dict) else {}
+                  at = item.get("awayTeam") if isinstance(item.get("awayTeam"), dict) else {}
+                  home = (
+                      item.get("homeTeamName")
+                      or item.get("home_name")
+                      or ht.get("name")
+                      or ""
+                  )
+                  away = (
+                      item.get("awayTeamName")
+                      or item.get("away_name")
+                      or at.get("name")
+                      or ""
+                  )
+                  if not home or not away or home == "?" or away == "?":
+                      continue
+                  logo = (
+                      item.get("homeTeamLogo")
+                      or item.get("home_logo")
+                      or ht.get("logo")
+                      or ""
+                  )
+                  comp = item.get("competition")
+                  if isinstance(comp, dict):
+                      league = comp.get("name") or comp.get("title") or label
+                  else:
+                      league = item.get("leagueName") or item.get("tournamentName") or (comp if isinstance(comp, str) else label)
+                  # thời gian: ưu tiên matchNormalizedDate ("14:45 04/11")
+                  time_label = (
+                      item.get("matchNormalizedDate")
+                      or item.get("matchNormalizedTime")
+                      or ""
+                  )
+                  if not time_label:
+                      ts = item.get("matchTime") or item.get("startTime")
+                      if isinstance(ts, (int, float)) and ts > 1e9:
+                          try:
+                              tsv = ts if ts < 1e12 else ts / 1000
+                              time_label = datetime.fromtimestamp(tsv).strftime("%H:%M - %d/%m")
+                          except Exception:
+                              pass
                   # streams từ BLV
                   blv = ""
                   stream_url = None
@@ -399,7 +425,7 @@ jobs:
                       if stream_url:
                           break
                   if not stream_url:
-                      for k in ("streamUrl", "playUrl", "url", "m3u8"):
+                      for k in ("streamUrl", "playUrl", "url", "m3u8", "defaultLink"):
                           u = item.get(k)
                           if isinstance(u, str) and u.startswith("http") and ".m3u8" in u:
                               stream_url = u
@@ -409,10 +435,13 @@ jobs:
                   title = f"{home} VS {away}"
                   name = title
                   if time_label:
-                      name = f"{time_label} | {title}"
+                      # chuẩn hoá "14:45 04/11" → "14:45 - 04/11"
+                      tl = str(time_label).strip()
+                      if " - " not in tl and " " in tl:
+                          tl = tl.replace(" ", " - ", 1)
+                      name = f"{tl} | {title}"
                   if blv:
                       name = f"{name} | {blv}"
-                  # gắn league
                   if league and league != label:
                       name = name.replace(title, f"{title} ({league})", 1)
                   out.append({
