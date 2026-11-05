@@ -1080,7 +1080,10 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.0.4";
+    const APP_VERSION = "2.1.0";
+    /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
+    const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
+    const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
     let allMatches = [];
     let currentTab = "live";
     let currentSport = "all";
@@ -1259,22 +1262,68 @@
       } catch { return iso; }
     }
 
+    /** Giới hạn an toàn theo giờ — chỉ dùng khi KHÔNG có status tin cậy từ API */
+    function softLiveMaxMin(m) {
+      const sp = typeof sportSlug === "function" ? sportSlug(m) : "football";
+      if (sp === "basketball") return 180;
+      if (sp === "tennis") return 240;
+      if (sp === "volleyball") return 150;
+      return 150; // bóng đá thường ~2h; hiệp phụ xử lý bằng status API
+    }
+
+    /** Trần cứng chống status "live" treo nhiều giờ (nguồn phụ / API lỗi) */
+    function hardLiveMaxMin(m) {
+      const sp = typeof sportSlug === "function" ? sportSlug(m) : "football";
+      if (sp === "basketball") return 240;
+      if (sp === "tennis") return 360;
+      return 210; // bóng đá kể cả hiệp phụ + penalty (~3.5h)
+    }
+
     function classify(m) {
       const s = String(m.status || "").toLowerCase();
-      if (s === "live" || s === "inplay" || s === "1h" || s === "2h" || s === "ht" || s === "half_time" || s === "halftime") return "live";
-      if (s === "finished" || s === "ft" || s === "after_pen" || s === "after_et" || s === "postponed" || s === "cancelled") return "done";
-      // Fallback theo start_time (khi status = scheduled nhưng đang trong khung giờ thi đấu)
+      const doneSet = [
+        "finished", "ft", "ended", "final", "after_pen", "after_et",
+        "aet", "pen", "postponed", "cancelled", "canceled", "abandoned"
+      ];
+      // after_pen / after_et = đã kết thúc sau hiệp phụ/pen
+      if (doneSet.includes(s)) return "done";
+
+      // Đang đá / hiệp phụ / penalty / giờ nghỉ — tin API (Xoiche)
+      const liveSet = [
+        "live", "inplay", "in_play", "1h", "2h", "ht", "half_time", "halftime",
+        "et", "extra_time", "extra time", "penalties", "penalty", "pen_live",
+        "break", "interrupted"
+      ];
+      const hasApiLive = liveSet.includes(s);
+      const isExternal = !!m._external;
+
       const t = m.start_time || m.kickoff;
+      let diffMin = null;
       if (t) {
         try {
           const start = new Date(t);
           if (!isNaN(start.getTime())) {
-            const diffMin = (Date.now() - start.getTime()) / 60000;
-            if (diffMin >= -15 && diffMin <= 150) return "live";
-            if (diffMin > 150) return "done";
+            diffMin = (Date.now() - start.getTime()) / 60000;
           }
         } catch (_) {}
       }
+
+      // API báo đang live (kể cả hiệp phụ): giữ LIVE, chỉ cắt khi quá trần cứng
+      if (hasApiLive && !isExternal) {
+        if (diffMin != null && diffMin > hardLiveMaxMin(m)) return "done";
+        return "live";
+      }
+
+      // Nguồn phụ chỉ có giờ ước lượng — dùng khung mềm
+      if (diffMin != null) {
+        if (diffMin > softLiveMaxMin(m)) return "done";
+        if (diffMin >= -15 && diffMin <= softLiveMaxMin(m)) return "live";
+        if (diffMin < -15) return "soon";
+      }
+
+      // Không có giờ: tin status
+      if (hasApiLive) return "live";
+      if (s === "scheduled" || s === "not_started" || s === "ns" || s === "timed") return "soon";
       return "soon";
     }
 
@@ -1365,8 +1414,11 @@
         }
         startIso = start.toISOString();
         const diffMin = (now - start) / 60000;
-        if (diffMin >= -20 && diffMin <= 150) status = "live";
-        else if (diffMin > 150) status = "finished";
+        const low0 = name.toLowerCase();
+        let maxLive = 150; // ước lượng nguồn phụ; hiệp phụ chỉ tin khi có API status
+        if (low0.includes("basket") || low0.includes("bóng rổ") || low0.includes("nba")) maxLive = 180;
+        if (diffMin >= -20 && diffMin <= maxLive) status = "live";
+        else if (diffMin > maxLive) status = "finished";
         else status = "scheduled";
       }
       const low = name.toLowerCase();
@@ -1939,6 +1991,23 @@
       }
     }
 
+
+    async function resolveStreamsFromWorker(provider, id) {
+      if (!RESOLVER_BASE || !String(RESOLVER_BASE).startsWith("http")) return [];
+      const u = new URL("/resolve", RESOLVER_BASE);
+      u.searchParams.set("provider", provider);
+      u.searchParams.set("id", String(id));
+      const headers = { Accept: "application/json" };
+      if (RESOLVER_KEY) headers["X-Resolver-Key"] = RESOLVER_KEY;
+      const res = await fetch(u.toString(), { headers, cache: "no-store" });
+      if (!res.ok) throw new Error("resolver_http_" + res.status);
+      const data = await res.json();
+      if (!data || !data.ok || !Array.isArray(data.streams)) return [];
+      return data.streams
+        .filter((s) => s && s.url && String(s.url).includes(".m3u8"))
+        .map((s) => ({ name: s.name || "BLV", url: s.url, stream_url: s.url }));
+    }
+
     async function openPlayer(m) {
       currentPlayMatch = m;
       const matchTitle = `${m.home_team?.name || m.home_team_name || "?"} vs ${m.away_team?.name || m.away_team_name || "?"}`;
@@ -1956,7 +2025,16 @@
       if (hls) { hls.destroy(); hls = null; }
 
       let streams = getStreams(m);
-      // Nếu list chưa có / thiếu, thử detail API (chỉ xoiche)
+      // Resolver (Cloudflare Worker) — token mới, ưu tiên cho Xoiche
+      if (!m._external && m.id && /^\d+$/.test(String(m.id)) && RESOLVER_BASE) {
+        try {
+          const resolved = await resolveStreamsFromWorker("xoiche", m.id);
+          if (resolved.length) streams = resolved;
+        } catch (e) {
+          console.warn("resolver", e);
+        }
+      }
+      // Fallback detail API Xoiche nếu vẫn thiếu
       if (!m._external && streams.length <= 1 && m.id) {
         try {
           const d = await fetchJson(BASE + "/api/matches/" + m.id + "/");
