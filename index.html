@@ -69,6 +69,86 @@
       border-bottom: 1px solid var(--border);
     }
     body.player-open .filter-bar { visibility: hidden; }
+
+    /* Phase 1: Compact navigation (mobile scroll) */
+    @media (max-width: 768px) {
+      body.nav-compact .header {
+        transform: translateY(-100%);
+        opacity: 0;
+        pointer-events: none;
+        border-bottom-color: transparent;
+      }
+      body.nav-compact .filter-bar {
+        top: 0;
+        padding-top: 6px;
+      }
+      body.nav-compact .filter-bar #sourceTabs,
+      body.nav-compact .filter-bar .search-row {
+        max-height: 0;
+        opacity: 0;
+        overflow: hidden;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        pointer-events: none;
+      }
+      body.nav-compact .filter-bar #tabs {
+        margin-bottom: 0;
+      }
+      .header,
+      .filter-bar #sourceTabs,
+      .filter-bar .search-row {
+        transition: max-height .22s ease, opacity .2s ease, transform .22s ease, margin .2s ease, padding .2s ease;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .header,
+        .filter-bar #sourceTabs,
+        .filter-bar .search-row {
+          transition: none;
+        }
+      }
+    }
+
+    /* Phase 2–3: Match card + visual polish */
+    .score { font-variant-numeric: tabular-nums; }
+    .card-bottom {
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .card-bottom-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      flex-wrap: wrap;
+    }
+    .card-bottom-action {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card .blv-row {
+      margin-top: 0;
+      flex: 1;
+      min-width: 0;
+    }
+    .status-bar {
+      margin-top: 4px;
+      margin-bottom: 16px;
+    }
+    .tabs .tab:not(.active) {
+      opacity: 0.82;
+    }
+    .tabs .tab.active {
+      opacity: 1;
+    }
+
     .header-inner {
       max-width: 1200px;
       margin: 0 auto;
@@ -450,8 +530,11 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 70%;
+      min-width: 0;
+      flex: 1;
+      max-width: none;
     }
+    .card-top .badge { flex: 0 0 auto; }
     .badge {
       font-size: .72rem;
       font-weight: 700;
@@ -1640,14 +1723,16 @@
               <div class="team-name">${esc(away)}</div>
             </div>
           </div>
-          ${blvHtml}
           <div class="card-bottom">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <button class="watch-btn${hasLink ? "" : " no-link"}" type="button" ${hasLink ? "" : "disabled"}>${watchLabel}</button>
+            <div class="card-bottom-info">
+              ${blvHtml}
               ${hasLink ? qualityHtml : ""}
               ${originHtml}
+              <span class="views">${m.views_count ? (esc(m.views_count) + " xem") : ""}</span>
             </div>
-            <div class="views">${m.views_count ? (esc(m.views_count) + " xem") : ""}</div>
+            <div class="card-bottom-action">
+              <button class="watch-btn${hasLink ? "" : " no-link"}" type="button" ${hasLink ? "" : "disabled"}>${watchLabel}</button>
+            </div>
           </div>
         `;
         if (hasLink) {
@@ -1934,6 +2019,38 @@
       if (refreshTimer) clearInterval(refreshTimer);
       refreshTimer = setInterval(fetchMatches, 60000);
     }
+
+
+    // Compact navigation on mobile (scroll down = compact, up = expand)
+    (function setupCompactNav() {
+      const mq = window.matchMedia("(max-width: 768px)");
+      let lastY = window.scrollY || 0;
+      let ticking = false;
+      const THRESH = 48;
+      function apply() {
+        if (!mq.matches || document.body.classList.contains("player-open")) {
+          document.body.classList.remove("nav-compact");
+          return;
+        }
+        const y = window.scrollY || 0;
+        if (y > lastY && y > THRESH) {
+          document.body.classList.add("nav-compact");
+        } else if (y < lastY - 8 || y < 24) {
+          document.body.classList.remove("nav-compact");
+        }
+        lastY = y;
+        ticking = false;
+      }
+      window.addEventListener("scroll", () => {
+        if (!ticking) {
+          ticking = true;
+          requestAnimationFrame(apply);
+        }
+      }, { passive: true });
+      mq.addEventListener?.("change", () => {
+        if (!mq.matches) document.body.classList.remove("nav-compact");
+      });
+    })();
 
     fetchMatches();
     startAutoRefresh();
