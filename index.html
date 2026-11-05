@@ -487,6 +487,9 @@
       0%, 100% { opacity: 1; }
       50% { opacity: .45; }
     }
+    @media (prefers-reduced-motion: reduce) {
+      .dot { animation: none; }
+    }
 
     /* Match grid */
     .grid {
@@ -604,13 +607,6 @@
     .score.live { color: #ff5c7a; }
     .time { font-size: .75rem; color: var(--muted); margin-top: 4px; }
 
-    .card-bottom {
-      margin-top: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
     .watch-btn {
       padding: 8px 12px;
       border-radius: 10px;
@@ -1017,7 +1013,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.0.0";
+    const APP_VERSION = "2.0.1";
     let allMatches = [];
     let currentTab = "live";
     let currentSport = "all";
@@ -2026,20 +2022,37 @@
       const mq = window.matchMedia("(max-width: 768px)");
       let lastY = window.scrollY || 0;
       let ticking = false;
-      const THRESH = 48;
+      const POS_THRESH = 64;   // tối thiểu scrollY mới được compact
+      const DELTA_DOWN = 24;  // phải cuộn xuống đủ xa
+      const DELTA_UP = 12;    // cuộn lên nhẹ thì mở lại
+      function searchFocused() {
+        const el = document.activeElement;
+        return !!(el && (el.id === "search" || el.classList.contains("search")));
+      }
       function apply() {
-        if (!mq.matches || document.body.classList.contains("player-open")) {
-          document.body.classList.remove("nav-compact");
-          return;
+        try {
+          if (!mq.matches || document.body.classList.contains("player-open")) {
+            document.body.classList.remove("nav-compact");
+            lastY = window.scrollY || 0;
+            return;
+          }
+          // Đang gõ tìm kiếm — không thu gọn
+          if (searchFocused()) {
+            document.body.classList.remove("nav-compact");
+            lastY = window.scrollY || 0;
+            return;
+          }
+          const y = window.scrollY || 0;
+          const delta = y - lastY;
+          if (delta > DELTA_DOWN && y > POS_THRESH) {
+            document.body.classList.add("nav-compact");
+          } else if (delta < -DELTA_UP || y < 24) {
+            document.body.classList.remove("nav-compact");
+          }
+          lastY = y;
+        } finally {
+          ticking = false;
         }
-        const y = window.scrollY || 0;
-        if (y > lastY && y > THRESH) {
-          document.body.classList.add("nav-compact");
-        } else if (y < lastY - 8 || y < 24) {
-          document.body.classList.remove("nav-compact");
-        }
-        lastY = y;
-        ticking = false;
       }
       window.addEventListener("scroll", () => {
         if (!ticking) {
@@ -2049,6 +2062,8 @@
       }, { passive: true });
       mq.addEventListener?.("change", () => {
         if (!mq.matches) document.body.classList.remove("nav-compact");
+        lastY = window.scrollY || 0;
+        ticking = false;
       });
     })();
 
