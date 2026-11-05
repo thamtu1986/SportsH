@@ -1080,7 +1080,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.0.3";
+    const APP_VERSION = "2.0.4";
     let allMatches = [];
     let currentTab = "live";
     let currentSport = "all";
@@ -1837,26 +1837,45 @@
       return { url, headers, needsReferer: !!(headers.Referer || headers.referer) };
     }
 
-    function playUrl(rawUrl, title) {
+    let playLoadTimer = null;
+    let currentPlayMatch = null;
+
+    function playUrl(rawUrl, title, matchCtx) {
       const video = document.getElementById("video");
       const fallback = document.getElementById("playerFallback");
       const picker = document.getElementById("blvPicker");
+      const ext = document.getElementById("openExternal");
       picker.classList.remove("open");
       video.style.display = "block";
       fallback.style.display = "none";
+      if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
       if (hls) { hls.destroy(); hls = null; }
       video.removeAttribute("src");
       video.load();
 
+      if (matchCtx) currentPlayMatch = matchCtx;
       const parsed = parseStreamUrl(rawUrl);
       const url = validateStreamUrl(parsed.url);
       document.getElementById("playerTitle").textContent = title || "Đang phát";
-      document.getElementById("openExternal").style.display = "";
-      document.getElementById("openExternal").href = url || "#";
       document.getElementById("playerOverlay").classList.add("open");
       document.body.classList.add("player-open");
 
+      const origin = originSiteFor(currentPlayMatch || matchCtx || null);
+      if (origin) {
+        ext.style.display = "";
+        ext.href = origin.url;
+        ext.textContent = "Xem trên " + origin.label;
+      } else if (url) {
+        ext.style.display = "";
+        ext.href = url;
+        ext.textContent = "Mở link stream (tab mới)";
+      } else {
+        ext.style.display = "none";
+      }
+
       const showFail = (msg) => {
+        if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
+        if (hls) { try { hls.destroy(); } catch (_) {} hls = null; }
         video.style.display = "none";
         fallback.style.display = "flex";
         fallback.querySelector("div").textContent = msg;
@@ -1867,38 +1886,61 @@
         return;
       }
 
-      // CDN bắt buộc Referer — trình duyệt không cho JS gắn Referer → 403
       if (parsed.needsReferer) {
-        showFail("Kênh này chặn xem trên web (cần Referer từ trang gốc). Trình duyệt không gửi được header này nên bị 403. Hãy dùng app IPTV (TiviMate / OTT) hoặc xem trên xoiche khi có BLV.");
+        showFail("Kênh này chặn xem trên web (cần Referer từ trang gốc). Hãy bấm «Xem trên site gốc» hoặc dùng app IPTV.");
         return;
       }
 
-      fallback.querySelector("div").textContent = "Không phát được trên trình duyệt này.";
+      // Nhiều CDN (Gà Vàng/Cola…) chỉ cho domain gốc — github.io hay bị treo spinner
+      playLoadTimer = setTimeout(() => {
+        showFail(
+          origin
+            ? "Stream không tải được trên SportsH (CDN/chặn domain). Hãy xem trên " + origin.label + "."
+            : "Stream không tải được trên trình duyệt. Thử nguồn khác hoặc app IPTV."
+        );
+      }, 10000);
+
       const isHls = /\.m3u8(\?|$)/i.test(url) || url.includes("m3u8");
       if (isHls && window.Hls && Hls.isSupported()) {
-        hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          fragLoadingMaxRetry: 2,
+          manifestLoadingMaxRetry: 2,
+          levelLoadingMaxRetry: 2
+        });
         hls.loadSource(url);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
           video.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
+          if (!data) return;
           if (data.fatal) {
-            showFail("Stream lỗi hoặc bị CDN chặn (403). Thử BLV/nguồn khác hoặc xem bằng app IPTV.");
+            showFail(
+              origin
+                ? "Stream bị CDN chặn trên web. Bấm «Xem trên " + origin.label + "» để xem ổn định."
+                : "Stream lỗi hoặc bị CDN chặn (403/CORS). Thử BLV khác hoặc app IPTV."
+            );
           }
         });
       } else if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = url;
+        video.addEventListener("loadedmetadata", () => {
+          if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
+        }, { once: true });
         video.play().catch(() => showFail("Không phát được HLS trên trình duyệt này."));
       } else if (!isHls) {
         video.src = url;
-        video.play().catch(() => showFail("Định dạng stream không hỗ trợ trên trình duyệt. Dùng app IPTV."));
+        video.play().catch(() => showFail("Định dạng stream không hỗ trợ trên trình duyệt."));
       } else {
         showFail("Trình duyệt không hỗ trợ phát stream này.");
       }
     }
 
     async function openPlayer(m) {
+      currentPlayMatch = m;
       const matchTitle = `${m.home_team?.name || m.home_team_name || "?"} vs ${m.away_team?.name || m.away_team_name || "?"}`;
       document.getElementById("playerTitle").textContent = "Đang lấy link xem...";
       document.getElementById("playerOverlay").classList.add("open");
@@ -1944,7 +1986,7 @@
       }
 
       if (streams.length === 1) {
-        playUrl(streams[0].url, matchTitle + " · " + streams[0].name);
+        playUrl(streams[0].url, matchTitle + " · " + streams[0].name, m);
         return;
       }
 
@@ -1957,7 +1999,7 @@
         btn.type = "button";
         btn.className = "blv-pick-btn";
         btn.textContent = "▶  " + s.name;
-        btn.addEventListener("click", () => playUrl(s.url, matchTitle + " · " + s.name));
+        btn.addEventListener("click", () => playUrl(s.url, matchTitle + " · " + s.name, m));
         list.appendChild(btn);
       });
       picker.classList.add("open");
