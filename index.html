@@ -125,7 +125,21 @@
       flex: 1;
       min-width: 0;
       overflow: hidden;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+    }
+    .card-bottom-info .blv-chip,
+    .card-bottom-info .q-chip,
+    .card-bottom-info .ext-link,
+    .card-bottom-info .views {
+      flex: 0 1 auto;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .card-bottom-action {
+      margin-left: 4px;
     }
     .card-bottom-action {
       flex: 0 0 auto;
@@ -602,10 +616,31 @@
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    .score-box { text-align: center; min-width: 64px; }
-    .score { font-size: 1.35rem; font-weight: 800; letter-spacing: .02em; }
+    .score-box {
+      text-align: center;
+      min-width: 72px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+    }
+    .score {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: .02em;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.15;
+    }
     .score.live { color: #ff5c7a; }
-    .time { font-size: .75rem; color: var(--muted); margin-top: 4px; }
+    .time {
+      font-size: .75rem;
+      color: var(--muted);
+      margin-top: 6px;
+      line-height: 1.2;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
 
     .watch-btn {
       padding: 8px 12px;
@@ -1013,7 +1048,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.0.1";
+    const APP_VERSION = "2.0.2";
     let allMatches = [];
     let currentTab = "live";
     let currentSport = "all";
