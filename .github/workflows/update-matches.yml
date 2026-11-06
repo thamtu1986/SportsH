@@ -111,7 +111,7 @@ jobs:
         run: |
           python3 << 'PY'
           import json, urllib.request, time, re, ssl, os
-          from datetime import datetime
+          from datetime import datetime, timedelta
           from urllib.parse import urlparse
 
           # Xác minh TLS đầy đủ (không tắt CERT)
@@ -398,7 +398,7 @@ jobs:
                       if isinstance(ts, (int, float)) and ts > 1e9:
                           try:
                               tsv = ts if ts < 1e12 else ts / 1000
-                              time_label = datetime.fromtimestamp(tsv).strftime("%H:%M - %d/%m")
+                              time_label = (datetime.utcfromtimestamp(tsv) + timedelta(hours=7)).strftime("%H:%M - %d/%m")
                           except Exception:
                               pass
                   # streams từ BLV
@@ -453,18 +453,31 @@ jobs:
                   })
               return out
 
-          gavang_sources = [
+          # Ưu tiên adviceme (đúng cặp đội). gvapi.cc đôi khi sai tên (vd Bình Phước thay Đồng Nai).
+          gavang_primary = [
               ("gavang", "https://gavangtv-api.adviceme.io/api/v1/matches?webType=gavang", "Gà Vàng"),
-              ("gavang", "https://api.gvapi.cc/api/matches", "Gà Vàng"),  # backup, cùng source key
               ("cola", "https://gavangtv-api.adviceme.io/api/v1/matches?webType=cola", "Cola"),
           ]
-          for key, url, label in gavang_sources:
+          gavang_counts = {}
+          for key, url, label in gavang_primary:
               try:
                   data = get_json(url)
                   items = parse_gavang_style(data, key, label)
                   add_items(items, key + "-api")
+                  gavang_counts[key] = len(items)
+                  print("OK", key, len(items))
               except Exception as e:
                   print("ERR", key, url[:40], e)
+                  gavang_counts[key] = 0
+          # Fallback gvapi chỉ khi primary Gà Vàng về 0 trận
+          if gavang_counts.get("gavang", 0) == 0:
+              try:
+                  data = get_json("https://api.gvapi.cc/api/matches")
+                  items = parse_gavang_style(data, "gavang", "Gà Vàng")
+                  add_items(items, "gavang-api-fallback")
+                  print("OK gavang-fallback", len(items))
+              except Exception as e:
+                  print("ERR gavang-fallback", e)
 
           # SH-16/SH-17/SH-26: validate stream URL (HLS HTTPS only)
           import ipaddress
