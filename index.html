@@ -1100,7 +1100,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.1.1";
+    const APP_VERSION = "2.1.2";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1114,6 +1114,15 @@
     let playerSession = 0;       // chống race khi đóng player giữa chừng
     let fetchInFlight = null;    // chống refresh chồng lấn
     let searchTimer = null;
+    let lastSnapshotAt = null;  // updated_at từ matches.json
+    let lastApiAt = null;
+    const runtimeLog = []; // observability nhẹ
+    function logRuntime(event, detail) {
+      try {
+        runtimeLog.push({ t: Date.now(), event, detail: String(detail || "").slice(0, 120) });
+        if (runtimeLog.length > 40) runtimeLog.shift();
+      } catch (_) {}
+    }
     let refreshTimer = null;
 
     /** Chỉ trả site xem được trên trình duyệt; nguồn chỉ có M3U (Giờ Vàng…) → null */
@@ -1260,6 +1269,26 @@
       return "";
     }
     /** Stream phát: HTTPS + host công khai + pathname kết thúc .m3u8 */
+    /** Host stream được chấp nhận (suffix match). Rỗng suffix = chặn hết nếu STRICT. */
+    const STREAM_HOST_ALLOW = [
+      "cdnfastter.xyz", "livecdn321.cdnfastter.xyz", "xoiche.live",
+      "ebaclofen.org", "gvapi.cc", "gavang", "cloudfront.net",
+      "akamaized.net", "edgesuite.net", "mpegts", "hls",
+      "onrender.com", "workers.dev", "cloudflare", "fastly"
+    ];
+    // Cho phép thêm host phổ biến CDN thể thao VN; nới lỏng: nếu không khớp allow vẫn OK nếu không private
+    const STREAM_HOST_STRICT = false;
+
+    function hostAllowed(hostname) {
+      const h = String(hostname || "").toLowerCase();
+      if (!h) return false;
+      if (STREAM_HOST_STRICT) {
+        return STREAM_HOST_ALLOW.some((a) => h === a || h.endsWith("." + a) || h.includes(a));
+      }
+      // mode mềm: chặn private; allowlist chỉ là ưu tiên (luôn pass public host)
+      return true;
+    }
+
     function validateStreamUrl(u) {
       const s = String(u || "").trim();
       if (!s) return "";
@@ -1268,7 +1297,7 @@
         if (x.protocol !== "https:") return "";
         if (!x.hostname || x.username || x.password) return "";
         const path = (x.pathname || "").toLowerCase();
-        if (!path.endsWith(".m3u8")) return "";
+        if (!path.endsWith(".m3u8") && !s.toLowerCase().includes(".m3u8")) return "";
         const h = x.hostname.toLowerCase();
         if (
           h === "localhost" || h === "127.0.0.1" || h === "::1" ||
@@ -1279,6 +1308,9 @@
           const n = parseInt(h.split(".")[1], 10);
           if (n >= 16 && n <= 31) return "";
         }
+        // IPv6 local
+        if (h.includes(":") && (h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80"))) return "";
+        if (STREAM_HOST_STRICT && !hostAllowed(h)) return "";
         return x.href;
       } catch (_) {
         return "";
@@ -1294,6 +1326,16 @@
           hour: "2-digit", minute: "2-digit"
         });
       } catch { return iso; }
+    }
+    function fmtDateTime(isoOrDate) {
+      try {
+        const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
+        if (isNaN(d.getTime())) return "";
+        return d.toLocaleString("vi-VN", {
+          day: "2-digit", month: "2-digit", year: "numeric",
+          hour: "2-digit", minute: "2-digit"
+        });
+      } catch { return ""; }
     }
 
     /** Giới hạn an toàn theo giờ — chỉ dùng khi KHÔNG có status tin cậy từ API */
@@ -1494,7 +1536,7 @@
       statusText.textContent = "Đang tải trận đấu...";
       liveDot.style.display = "none";
 
-      const applyList = (results, extra, source) => {
+      const applyList = (results, extra, source, meta) => {
         const notDone = results.filter(m => classify(m) !== "done");
         const liveSoon = notDone.filter(m => {
           const c = classify(m);
@@ -1502,14 +1544,26 @@
         });
         const done = results.filter(m => classify(m) === "done" && hasWatchableStream(m)).slice(0, 30);
         allMatches = liveSoon.concat(extra).concat(done);
-        const now = new Date();
-        const dateStr = now.toLocaleDateString("vi-VN", {
-          weekday: "short", day: "2-digit", month: "2-digit", year: "numeric"
-        });
-        const timeStr = now.toLocaleTimeString("vi-VN", {
-          hour: "2-digit", minute: "2-digit", second: "2-digit"
-        });
-        updatedAt.textContent = dateStr + " · Cập nhật " + timeStr + (source === "cache" ? " · snapshot" : "");
+
+        // Thời gian: ưu tiên updated_at snapshot / API, không dùng "now" làm timestamp dữ liệu
+        const snapIso = (meta && meta.snapshotAt) || lastSnapshotAt;
+        const apiIso = (meta && meta.apiAt) || lastApiAt;
+        let line = "";
+        if (source === "api" && (apiIso || true)) {
+          lastApiAt = apiIso || new Date().toISOString();
+          line = "API · " + fmtDateTime(lastApiAt);
+        } else if (source === "cache" && snapIso) {
+          line = "Snapshot · " + fmtDateTime(snapIso);
+          const ageH = (Date.now() - new Date(snapIso).getTime()) / 3600000;
+          if (ageH > 24) line += " · ⚠ dữ liệu >24h";
+          else if (ageH > 6) line += " · hơi cũ";
+        } else if (snapIso) {
+          line = "Snapshot · " + fmtDateTime(snapIso);
+        } else {
+          line = "Tải lúc · " + fmtDateTime(new Date());
+        }
+        updatedAt.textContent = line;
+
         const liveCount = allMatches.filter(m => classify(m) === "live").length;
         const withLink = allMatches.filter(hasWatchableStream).length;
         statusText.textContent =
@@ -1519,6 +1573,7 @@
         updateSportTabs();
         updateCounts();
         render();
+        logRuntime("applyList", source + " n=" + allMatches.length);
       };
 
       fetchInFlight = (async () => {
@@ -1530,9 +1585,10 @@
           ]);
           const extra = (extraRaw || []).map((ch, i) => channelToMatch(ch, i)).filter(Boolean);
           if (local && local.results && local.results.length) {
+            lastSnapshotAt = local.updated_at || local.updatedAt || null;
             const cached = local.results.map((m) => ({ ...m, _source: "xoiche" }));
             state.style.display = "none";
-            applyList(cached, extra, "cache");
+            applyList(cached, extra, "cache", { snapshotAt: lastSnapshotAt });
           } else {
             state.style.display = "block";
             state.innerHTML = `<div class="spinner"></div>Đang tải dữ liệu...`;
@@ -1555,7 +1611,7 @@
                 // Cập nhật UI sau trang đầu
                 if (safetyLoop === 0) {
                   state.style.display = "none";
-                  applyList(results, extra, "api");
+                  applyList(results, extra, "api", { apiAt: new Date().toISOString() });
                 }
               }
               if (data && data.next) {
@@ -1573,10 +1629,10 @@
             }
             if (usedApi && results.length) {
               state.style.display = "none";
-              applyList(results, extra, "api");
+              applyList(results, extra, "api", { apiAt: new Date().toISOString() });
             } else if (!allMatches.length && extra.length) {
               state.style.display = "none";
-              applyList([], extra, "extra-only");
+              applyList([], extra, "extra-only", { snapshotAt: lastSnapshotAt });
             } else if (!allMatches.length) {
               statusText.textContent = "Không có dữ liệu trận";
               state.style.display = "block";
@@ -1897,7 +1953,7 @@
           const ini = esc(initials(name));
           const src = safeUrl(logo);
           if (src) {
-            return `<img src="${esc(src)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" />
+            return `<img src="${esc(src)}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" />
               <div class="team-avatar" style="display:none">${ini}</div>`;
           }
           return `<div class="team-avatar">${ini}</div>`;
@@ -2019,7 +2075,12 @@
     let playLoadTimer = null;
     let currentPlayMatch = null;
 
-    function playUrl(rawUrl, title, matchCtx) {
+    function playUrl(rawUrl, title, matchCtx, session) {
+      const sess = session != null ? session : playerSession;
+      const isCurrentSession = () =>
+        sess === playerSession &&
+        document.getElementById("playerOverlay").classList.contains("open");
+
       const video = document.getElementById("video");
       const fallback = document.getElementById("playerFallback");
       const picker = document.getElementById("blvPicker");
@@ -2053,11 +2114,13 @@
       }
 
       const showFail = (msg) => {
+        if (!isCurrentSession()) return;
         if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
         if (hls) { try { hls.destroy(); } catch (_) {} hls = null; }
         video.style.display = "none";
         fallback.style.display = "flex";
         fallback.querySelector("div").textContent = msg;
+        logRuntime("play_fail", msg);
       };
 
       if (!url) {
@@ -2070,8 +2133,8 @@
         return;
       }
 
-      // Nhiều CDN (Gà Vàng/Cola…) chỉ cho domain gốc — github.io hay bị treo spinner
       playLoadTimer = setTimeout(() => {
+        if (!isCurrentSession()) return;
         showFail(
           origin
             ? "Stream không tải được trên SportsH (CDN/chặn domain). Hãy xem trên " + origin.label + "."
@@ -2081,6 +2144,7 @@
 
       const isHls = /\.m3u8(\?|$)/i.test(url) || url.includes("m3u8");
       const tryPlay = () => {
+        if (!isCurrentSession()) return;
         if (isHls && window.Hls && Hls.isSupported()) {
           hls = new Hls({
             enableWorker: true,
@@ -2092,12 +2156,17 @@
           hls.loadSource(url);
           hls.attachMedia(video);
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (!isCurrentSession()) return;
             if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
             video.play().catch(() => {});
+            logRuntime("play_ok", title);
           });
           hls.on(Hls.Events.ERROR, (_, data) => {
+            if (!isCurrentSession()) return;
             if (!data) return;
             if (data.fatal) {
+              const code = (data.response && data.response.code) || "";
+              logRuntime("hls_fatal", code || data.type);
               showFail(
                 origin
                   ? "Stream bị CDN chặn trên web. Bấm «Xem trên " + origin.label + "» để xem ổn định."
@@ -2108,6 +2177,7 @@
         } else if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = url;
           video.addEventListener("loadedmetadata", () => {
+            if (!isCurrentSession()) return;
             if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
           }, { once: true });
           video.play().catch(() => showFail("Không phát được HLS trên trình duyệt này."));
@@ -2119,7 +2189,11 @@
         }
       };
       if (isHls) {
-        ensureHls().then(tryPlay).catch(() => {
+        ensureHls().then(() => {
+          if (!isCurrentSession()) return;
+          tryPlay();
+        }).catch(() => {
+          if (!isCurrentSession()) return;
           if (video.canPlayType("application/vnd.apple.mpegurl")) tryPlay();
           else showFail("Không tải được bộ phát HLS.");
         });
@@ -2208,7 +2282,7 @@
       }
 
       if (streams.length === 1) {
-        playUrl(streams[0].url, matchTitle + " · " + streams[0].name, m);
+        playUrl(streams[0].url, matchTitle + " · " + streams[0].name, m, session);
         return;
       }
 
@@ -2221,7 +2295,7 @@
         btn.type = "button";
         btn.className = "blv-pick-btn";
         btn.textContent = "▶  " + s.name;
-        btn.addEventListener("click", () => playUrl(s.url, matchTitle + " · " + s.name, m));
+        btn.addEventListener("click", () => playUrl(s.url, matchTitle + " · " + s.name, m, session));
         list.appendChild(btn);
       });
       picker.classList.add("open");
