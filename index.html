@@ -1064,8 +1064,24 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js" integrity="sha384-9v3HcdYrO3D+OPDTjZ40RXocgE4GtXVCd3/mCS62JsM93JXgI1afJVuwjFvsu6ni" crossorigin="anonymous"></script>
   <script>
+    // HLS.js chỉ tải khi mở player — giảm thời gian tải trang đầu
+    let __hlsLoading = null;
+    function ensureHls() {
+      if (window.Hls) return Promise.resolve(window.Hls);
+      if (__hlsLoading) return __hlsLoading;
+      __hlsLoading = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
+        s.integrity = "sha384-9v3HcdYrO3D+OPDTjZ40RXocgE4GtXVCd3/mCS62JsM93JXgI1afJVuwjFvsu6ni";
+        s.crossOrigin = "anonymous";
+        s.onload = () => resolve(window.Hls);
+        s.onerror = () => reject(new Error("hls_load_failed"));
+        document.head.appendChild(s);
+      });
+      return __hlsLoading;
+    }
+
     const API = "https://xoiche.live/api/matches/?ordering=smart&page_size=100&site=xoiche";
     const BASE = "https://xoiche.live";
     // Cùng origin với GitHub Pages → không CORS
@@ -1113,7 +1129,11 @@
 
     async function fetchSameOriginJson(path) {
       try {
-        const res = await fetch(path + "?t=" + Date.now(), { cache: "no-store" });
+        // Cache ngắn (browser) — workflow ~10' nên không cần no-store mỗi lần
+        const res = await fetch(path, {
+          cache: "default",
+          headers: { Accept: "application/json" }
+        });
         if (!res.ok) return null;
         return await res.json();
       } catch (_) {
@@ -1135,7 +1155,7 @@
       for (const reqUrl of attempts) {
         try {
           const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 12000);
+          const timer = setTimeout(() => ctrl.abort(), 8000);
           const res = await fetch(reqUrl, {
             signal: ctrl.signal,
             headers: { Accept: "application/json" },
@@ -1183,10 +1203,17 @@
       tennis: "🎾 Quần vợt",
       badminton: "🏸 Cầu lông",
       tabletennis: "🏓 Bóng bàn",
-      esports: "🎮 Esports",
       hockey: "🏒 Khúc côn cầu",
       baseball: "⚾ Bóng chày",
-      handball: "🤾 Bóng ném"
+      handball: "🤾 Bóng ném",
+      rugby: "🏉 Rugby",
+      cricket: "🏏 Cricket",
+      boxing: "🥊 Quyền Anh",
+      mma: "🥋 MMA",
+      golf: "⛳ Golf",
+      snooker: "🎱 Bi-a",
+      esports: "🎮 Esports",
+      other: "🏅 Khác"
     };
     const SRC_LABELS = {
       giovang: "Giờ Vàng", gavang: "Gà Vàng", cola: "Cola", phalang: "PhaLang",
@@ -1421,11 +1448,8 @@
         else if (diffMin > maxLive) status = "finished";
         else status = "scheduled";
       }
-      const low = name.toLowerCase();
-      let sport_slug = "football";
-      if (low.includes("basket") || low.includes("bóng rổ") || low.includes("cba") || low.includes("nba")) sport_slug = "basketball";
-      else if (low.includes("tennis") || low.includes("vợt")) sport_slug = "tennis";
-      else if (low.includes("volley") || low.includes("chuyền")) sport_slug = "volleyball";
+      const low = (name + " " + (league || "") + " " + (ch.group || "")).toLowerCase();
+      let sport_slug = detectSportFromText(low) || "other";
 
       return {
         id: "ch-" + src + "-" + idx,
@@ -1454,60 +1478,15 @@
       liveDot.style.display = "none";
       state.style.display = "block";
       state.innerHTML = `<div class="spinner"></div>Đang tải dữ liệu...`;
-      try {
-        let results = [];
-        let source = "";
 
-        // 1) xoiche — LUÔN gọi API (tỉ số/phút live); cache chỉ khi API lỗi/CORS
-        const local = await fetchLocalMatches();
-        let usedApi = false;
-        try {
-          let url = API;
-          let safetyLoop = 0;
-          while (url && safetyLoop < 10) {
-            const data = await fetchJson(url);
-            if (data && data.results) results = results.concat(data.results);
-            else if (Array.isArray(data)) { results = results.concat(data); break; }
-            if (data && data.next) {
-              const nxt = data.next.startsWith("http") ? data.next : (BASE + data.next);
-              try {
-                const parsed = new URL(nxt);
-                if (
-                  parsed.protocol !== "https:" ||
-                  !["xoiche.live", "www.xoiche.live"].includes(parsed.hostname)
-                ) break;
-              } catch (_) { break; }
-              url = nxt;
-            } else break;
-            safetyLoop++;
-          }
-          if (results.length) {
-            results = results.map((m) => ({ ...m, _source: "xoiche" }));
-            source = "api";
-            usedApi = true;
-          }
-        } catch (apiErr) {
-          console.warn("xoiche API", apiErr);
-        }
-        if (!usedApi && local && local.results && local.results.length) {
-          results = local.results.map((m) => ({ ...m, _source: "xoiche" }));
-          source = "cache";
-        }
-
-        // Giữ trận live/sắp diễn ra kể cả chưa có m3u8 (vẫn hiện trên danh sách)
+      const applyList = (results, extra, source) => {
         const notDone = results.filter(m => classify(m) !== "done");
-        const liveSoon = notDone.filter(m => classify(m) === "live" || classify(m) === "soon" || hasWatchableStream(m));
+        const liveSoon = notDone.filter(m => {
+          const c = classify(m);
+          return c === "live" || c === "soon" || hasWatchableStream(m);
+        });
         const done = results.filter(m => classify(m) === "done" && hasWatchableStream(m)).slice(0, 30);
-
-        // 2) Nguồn phụ từ channels.json (cùng origin — không CORS)
-        let extra = [];
-        try {
-          const chs = await fetchLocalChannels();
-          extra = chs.map((ch, i) => channelToMatch(ch, i)).filter(Boolean);
-        } catch (_) {}
-
         allMatches = liveSoon.concat(extra).concat(done);
-
         const now = new Date();
         const dateStr = now.toLocaleDateString("vi-VN", {
           weekday: "short", day: "2-digit", month: "2-digit", year: "numeric"
@@ -1522,10 +1501,82 @@
           allMatches.length + " trận · " +
           liveCount + " live · " + withLink + " có link · " + extra.length + " nguồn phụ";
         liveDot.style.display = liveCount ? "inline-block" : "none";
-
         updateSportTabs();
         updateCounts();
         render();
+        return source;
+      };
+
+      try {
+        // Song song: API trang 1 + channels.json + matches.json dự phòng
+        const apiFirstUrl = API + (API.includes("?") ? "&" : "?") + "page=1";
+        // page_size đã có trong API const
+        const pApi = fetchJson(API).then(data => data).catch(e => ({ __err: e }));
+        const pCh = fetchLocalChannels().catch(() => []);
+        const pLocal = fetchLocalMatches().catch(() => null);
+
+        const [apiData, extraRaw, local] = await Promise.all([pApi, pCh, pLocal]);
+        const extra = (extraRaw || []).map((ch, i) => channelToMatch(ch, i)).filter(Boolean);
+
+        let results = [];
+        let usedApi = false;
+        let nextUrl = null;
+
+        if (apiData && !apiData.__err) {
+          if (apiData.results) results = apiData.results.slice();
+          else if (Array.isArray(apiData)) results = apiData.slice();
+          if (results.length) {
+            results = results.map((m) => ({ ...m, _source: "xoiche" }));
+            usedApi = true;
+          }
+          if (apiData.next) {
+            try {
+              const nxt = apiData.next.startsWith("http") ? apiData.next : (BASE + apiData.next);
+              const parsed = new URL(nxt);
+              if (parsed.protocol === "https:" && ["xoiche.live", "www.xoiche.live"].includes(parsed.hostname)) {
+                nextUrl = nxt;
+              }
+            } catch (_) {}
+          }
+        }
+
+        if (!usedApi && local && local.results && local.results.length) {
+          results = local.results.map((m) => ({ ...m, _source: "xoiche" }));
+          applyList(results, extra, "cache");
+        } else if (usedApi) {
+          // First paint nhanh với trang 1 + nguồn phụ
+          applyList(results, extra, "api");
+
+          // Nối trang 2+ nền (không chặn UI)
+          let url = nextUrl;
+          let safetyLoop = 0;
+          while (url && safetyLoop < 8) {
+            safetyLoop++;
+            try {
+              const data = await fetchJson(url);
+              let more = [];
+              if (data && data.results) more = data.results;
+              else if (Array.isArray(data)) more = data;
+              if (more.length) {
+                results = results.concat(more.map((m) => ({ ...m, _source: "xoiche" })));
+                applyList(results, extra, "api");
+              }
+              if (data && data.next) {
+                const nxt = data.next.startsWith("http") ? data.next : (BASE + data.next);
+                try {
+                  const parsed = new URL(nxt);
+                  if (
+                    parsed.protocol !== "https:" ||
+                    !["xoiche.live", "www.xoiche.live"].includes(parsed.hostname)
+                  ) break;
+                  url = nxt;
+                } catch (_) { break; }
+              } else break;
+            } catch (_) { break; }
+          }
+        } else {
+          applyList([], extra, "extra-only");
+        }
       } catch (e) {
         console.error(e);
         statusText.textContent = "Lỗi tải dữ liệu";
@@ -1560,16 +1611,75 @@
       const s = String(value || "").toLowerCase().trim();
       return /^[a-z0-9_-]{1,32}$/.test(s) ? s : "other";
     }
+    function detectSportFromText(text) {
+      const p = String(text || "").toLowerCase();
+      if (!p.trim()) return "";
+      if (/\bhockey\b|nhl|khúc côn|ice\s*hockey/.test(p)) return "hockey";
+      if (/volleyball|bóng\s*chuyền|\bchuyền\b/.test(p)) return "volleyball";
+      if (/basketball|bóng\s*rổ|\bnba\b|\bncaa\b|\bcba\b|euroleague|wnba/.test(p)) return "basketball";
+      if (/\btennis\b|quần\s*vợt|\batp\b|\bwta\b|wimbledon/.test(p)) return "tennis";
+      if (/badminton|cầu\s*lông/.test(p)) return "badminton";
+      if (/table\s*tennis|bóng\s*bàn|ping\s*pong/.test(p)) return "tabletennis";
+      if (/\bbaseball\b|\bmlb\b|bóng\s*chày/.test(p)) return "baseball";
+      if (/handball|bóng\s*ném/.test(p)) return "handball";
+      if (/\brugby\b/.test(p)) return "rugby";
+      if (/\bcricket\b/.test(p)) return "cricket";
+      if (/\bmma\b|ufc|one championship/.test(p)) return "mma";
+      if (/boxing|quyền anh|quyen anh/.test(p)) return "boxing";
+      if (/\bgolf\b/.test(p)) return "golf";
+      if (/snooker|billiard|bi-a|bi a/.test(p)) return "snooker";
+      if (/american\s*football|\bnfl\b/.test(p)) return "other";
+      if (/esport|e-sport|\bdota\b|\blol\b|league of legends|cs:?go|valorant|mobile legends/.test(p)) return "esports";
+      if (/football|soccer|bóng\s*đá|v[\s-]?league|premier league|la liga|serie a|bundesliga|ligue 1|world cup|champions league|vô địch quốc gia|hạng nhất|hạng nhì|cúp quốc gia|afc\b|mls\b/.test(p)) return "football";
+      return "";
+    }
+
+    const API_SPORT_MAP = {
+      football: "football", soccer: "football",
+      basketball: "basketball",
+      volleyball: "volleyball",
+      tennis: "tennis",
+      badminton: "badminton",
+      tabletennis: "tabletennis", "table-tennis": "tabletennis", "table_tennis": "tabletennis",
+      hockey: "hockey", icehockey: "hockey", "ice-hockey": "hockey", "ice_hockey": "hockey",
+      baseball: "baseball",
+      handball: "handball",
+      rugby: "rugby",
+      cricket: "cricket",
+      boxing: "boxing",
+      mma: "mma",
+      golf: "golf",
+      snooker: "snooker",
+      esports: "esports", esport: "esports", "e-sports": "esports"
+    };
+
     function sportSlug(m) {
-      const raw = (m.sport_slug || m.sport?.slug || m.sport_name || m.sport?.name || "other").toLowerCase();
-      if (raw.includes("chuyền") || raw.includes("volleyball")) return "volleyball";
-      if (raw.includes("bóng đá") || raw.includes("football") || raw.includes("soccer")) return "football";
-      if (raw.includes("bóng rổ") || raw.includes("basketball")) return "basketball";
-      if (raw.includes("quần vợt") || raw.includes("tennis")) return "tennis";
-      if (raw.includes("cầu lông") || raw.includes("badminton")) return "badminton";
-      if (raw.includes("bóng bàn") || raw.includes("table tennis")) return "tabletennis";
-      if (raw.includes("esports") || raw.includes("game")) return "esports";
-      return safeSportSlug(raw);
+      const tourBlob = [
+        m.tournament_name, m.tournament?.name, m.league,
+        m.home_team_name, m.away_team_name,
+        m.home_team?.name, m.away_team?.name
+      ].filter(Boolean).join(" ");
+      const fromTour = detectSportFromText(tourBlob);
+
+      // API sport slug/name
+      const apiRaw = String(
+        m.sport_slug || m.sport?.slug || m.sport_name || m.sport?.name || ""
+      ).toLowerCase().trim();
+      const fromApi = API_SPORT_MAP[apiRaw] || detectSportFromText(apiRaw) || "";
+
+      // Xung đột: giải nói hockey/NBA... trong khi API ghi football → theo giải
+      if (fromTour && fromApi && fromTour !== fromApi) {
+        if (fromTour !== "football") return fromTour;
+        return fromApi;
+      }
+      if (fromApi) return fromApi;
+      if (fromTour) return fromTour;
+
+      const all = detectSportFromText(
+        [apiRaw, tourBlob, m.sport_slug, m.sport_name].filter(Boolean).join(" ")
+      );
+      if (all) return all;
+      return "other";
     }
 
     function updateSportTabs() {
@@ -1580,7 +1690,7 @@
         counts[s] = (counts[s] || 0) + 1;
         if (classify(m) === "live") liveBySport[s] = (liveBySport[s] || 0) + 1;
       });
-      const fixed = ["football","volleyball","basketball","tennis","badminton","tabletennis","esports"];
+      const fixed = ["football","basketball","volleyball","tennis","hockey","badminton","tabletennis","baseball","handball","rugby","esports","boxing","mma","other"];
       const slugs = fixed.filter(s => counts[s]).concat(
         Object.keys(counts).filter(s => !fixed.includes(s) && /^[a-z0-9_-]{1,32}$/.test(s))
       );
@@ -1953,41 +2063,51 @@
       }, 10000);
 
       const isHls = /\.m3u8(\?|$)/i.test(url) || url.includes("m3u8");
-      if (isHls && window.Hls && Hls.isSupported()) {
-        hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true,
-          fragLoadingMaxRetry: 2,
-          manifestLoadingMaxRetry: 2,
-          levelLoadingMaxRetry: 2
+      const tryPlay = () => {
+        if (isHls && window.Hls && Hls.isSupported()) {
+          hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            fragLoadingMaxRetry: 2,
+            manifestLoadingMaxRetry: 2,
+            levelLoadingMaxRetry: 2
+          });
+          hls.loadSource(url);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
+            video.play().catch(() => {});
+          });
+          hls.on(Hls.Events.ERROR, (_, data) => {
+            if (!data) return;
+            if (data.fatal) {
+              showFail(
+                origin
+                  ? "Stream bị CDN chặn trên web. Bấm «Xem trên " + origin.label + "» để xem ổn định."
+                  : "Stream lỗi hoặc bị CDN chặn (403/CORS). Thử BLV khác hoặc app IPTV."
+              );
+            }
+          });
+        } else if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = url;
+          video.addEventListener("loadedmetadata", () => {
+            if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
+          }, { once: true });
+          video.play().catch(() => showFail("Không phát được HLS trên trình duyệt này."));
+        } else if (!isHls) {
+          video.src = url;
+          video.play().catch(() => showFail("Định dạng stream không hỗ trợ trên trình duyệt."));
+        } else {
+          showFail("Trình duyệt không hỗ trợ phát stream này.");
+        }
+      };
+      if (isHls) {
+        ensureHls().then(tryPlay).catch(() => {
+          if (video.canPlayType("application/vnd.apple.mpegurl")) tryPlay();
+          else showFail("Không tải được bộ phát HLS.");
         });
-        hls.loadSource(url);
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
-          video.play().catch(() => {});
-        });
-        hls.on(Hls.Events.ERROR, (_, data) => {
-          if (!data) return;
-          if (data.fatal) {
-            showFail(
-              origin
-                ? "Stream bị CDN chặn trên web. Bấm «Xem trên " + origin.label + "» để xem ổn định."
-                : "Stream lỗi hoặc bị CDN chặn (403/CORS). Thử BLV khác hoặc app IPTV."
-            );
-          }
-        });
-      } else if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = url;
-        video.addEventListener("loadedmetadata", () => {
-          if (playLoadTimer) { clearTimeout(playLoadTimer); playLoadTimer = null; }
-        }, { once: true });
-        video.play().catch(() => showFail("Không phát được HLS trên trình duyệt này."));
-      } else if (!isHls) {
-        video.src = url;
-        video.play().catch(() => showFail("Định dạng stream không hỗ trợ trên trình duyệt."));
       } else {
-        showFail("Trình duyệt không hỗ trợ phát stream này.");
+        tryPlay();
       }
     }
 
@@ -2010,6 +2130,8 @@
 
     async function openPlayer(m) {
       currentPlayMatch = m;
+      // Prefetch HLS.js khi mở player (song song lấy stream)
+      ensureHls().catch(() => {});
       const matchTitle = `${m.home_team?.name || m.home_team_name || "?"} vs ${m.away_team?.name || m.away_team_name || "?"}`;
       document.getElementById("playerTitle").textContent = "Đang lấy link xem...";
       document.getElementById("playerOverlay").classList.add("open");
