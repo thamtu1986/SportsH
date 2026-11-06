@@ -1,7 +1,5 @@
-SportsH v2.1.2 — Reliability Hardening
-- Snapshot updated_at displayed (not page load time); stale >24h warning
-- playUrl(session) guards ensureHls + HLS callbacks
-- Logo loading=lazy decoding=async
-- Stream host policy hooks (private IP block; optional strict allowlist)
-- Lightweight runtimeLog for play/api events
-NOTE: Refresh matches.json/channels.json via GitHub Actions on the real repo (ZIP may ship old snapshot).
+SportsH v2.1.5 — full source review
+- channels.json refreshed from adviceme (Dong Nai vs SHB Da Nang)
+- Frontend dedupe external matches (team+time)
+- Header Actions button layout
+- Gà Vàng API priority (workflow) retained from 2.1.4
