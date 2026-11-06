@@ -1,3 +1,8 @@
-SportsH v2.0.2
-- Score/time cluster: margin-top 6px, tabular-nums, line-height
-- Card footer chips: nowrap + ellipsis, action button reserved space
+SportsH v2.1.1 — Audit Phase 4/5 reliability
+- Local snapshot first, API updates in background
+- fetchInFlight + session id (no refresh/player race)
+- HLS.js load retry after failure
+- postponed/cancelled/interrupted badges
+- Score – instead of fake 0-0; quality 4K label
+- Search debounce 200ms; lazy images
+- Allow mobile zoom (a11y)
