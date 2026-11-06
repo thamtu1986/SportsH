@@ -1101,7 +1101,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.1.6";
+    const APP_VERSION = "2.1.7";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1549,8 +1549,11 @@
       const low = (name + " " + (league || "") + " " + (ch.group || "")).toLowerCase();
       let sport_slug = detectSportFromText(low);
       if (!sport_slug) {
-        // Gà Vàng / Cola / Giờ Vàng: đa số là bóng đá khi không nhận ra môn khác
-        sport_slug = ["gavang", "cola", "giovang"].includes(src) ? "football" : "other";
+        // Không mặc định football nếu tên có dấu hiệu game/esports
+        const maybeGame = /cs2|cs:?go|dota|valorant|esport|iem|game|console|joystick/i.test(low);
+        if (maybeGame) sport_slug = "esports";
+        else if (["gavang", "cola", "giovang"].includes(src)) sport_slug = "football";
+        else sport_slug = "other";
       }
 
       return {
@@ -1742,7 +1745,16 @@
       if (/\bgolf\b/.test(p)) return "golf";
       if (/snooker|billiard|bi-a|bi a/.test(p)) return "snooker";
       if (/american\s*football|\bnfl\b/.test(p)) return "other";
-      if (/esport|e-sport|\bdota\b|\blol\b|league of legends|cs:?go|valorant|mobile legends/.test(p)) return "esports";
+      // Esports — phải đứng trước rule bóng đá (tránh CS2/IEM bị gán football)
+      if (
+        /esport|e[\s-]?sport/.test(p) ||
+        /\bcs2\b|cs:?go|counter[\s-]?strike/.test(p) ||
+        /\bdota\s*2?\b|\blol\b|league of legends|wild\s*rift/.test(p) ||
+        /valorant|\bvct\b|mobile legends|\bmlbb\b|pubg|free\s*fire/.test(p) ||
+        /\biem\b|\besl\b|blast\s*premier|\bmajor\b.*\b(cs|counter)/.test(p) ||
+        /\blck\b|\blpl\b|\blcs\b|\bmsi\b|\bworlds\b/.test(p) ||
+        /parivision|\bnavi\b|natus vincere|fnatic|g2\s*esports|team\s*liquid|cloud9/.test(p)
+      ) return "esports";
       // Bóng đá — phủ tên giải phổ biến (Gà Vàng hay dùng English league names)
       if (
         /football|soccer|bóng\s*đá|futbol/.test(p) ||
