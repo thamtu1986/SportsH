@@ -1101,7 +1101,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.1.5";
+    const APP_VERSION = "2.1.6";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1547,7 +1547,11 @@
         else status = "scheduled";
       }
       const low = (name + " " + (league || "") + " " + (ch.group || "")).toLowerCase();
-      let sport_slug = detectSportFromText(low) || "other";
+      let sport_slug = detectSportFromText(low);
+      if (!sport_slug) {
+        // Gà Vàng / Cola / Giờ Vàng: đa số là bóng đá khi không nhận ra môn khác
+        sport_slug = ["gavang", "cola", "giovang"].includes(src) ? "football" : "other";
+      }
 
       return {
         id: "ch-" + src + "-" + idx,
@@ -1739,7 +1743,20 @@
       if (/snooker|billiard|bi-a|bi a/.test(p)) return "snooker";
       if (/american\s*football|\bnfl\b/.test(p)) return "other";
       if (/esport|e-sport|\bdota\b|\blol\b|league of legends|cs:?go|valorant|mobile legends/.test(p)) return "esports";
-      if (/football|soccer|bóng\s*đá|v[\s-]?league|v\.league|premier league|la liga|serie a|bundesliga|ligue 1|world cup|champions league|vô địch quốc gia|hạng nhất|hạng nhì|cúp quốc gia|afc\b|mls\b|ngoại hạng|cúp quốc gia|đông nam á/.test(p)) return "football";
+      // Bóng đá — phủ tên giải phổ biến (Gà Vàng hay dùng English league names)
+      if (
+        /football|soccer|bóng\s*đá|futbol/.test(p) ||
+        /v[\s.-]?league|premier\s*league|la\s*liga|serie\s*a|bundesliga|ligue\s*1/.test(p) ||
+        /world\s*cup|champions?\s*league|europa\s*league|conference\s*league/.test(p) ||
+        /vô\s*địch\s*quốc\s*gia|hạng\s*nhất|hạng\s*nhì|cúp\s*quốc\s*gia|ngoại\s*hạng/.test(p) ||
+        /\bafc\b|\bmls\b|\bepl\b|\bufa\b/.test(p) ||
+        /\ba[\s-]?league\b|\bw[\s-]?league\b|\bm[\s-]?league\b/.test(p) ||
+        /national\s+(champion|first\s*class|premier)/.test(p) ||
+        /super\s*league|stars\s*league|pro\s*league|first\s*division|division\s*1/.test(p) ||
+        /thai\s*league|indonesian|vietnam\s*national|indian\s+(super|league)|qatar\s*stars/.test(p) ||
+        /azerbaijan\s*premier|k\s*league|j[\s-]?league|chinese\s*super/.test(p) ||
+        /\bfc\b|\bunited\b|\bcity\b|\brovers\b/.test(p) && /league|cup|liga|giải/.test(p)
+      ) return "football";
       return "";
     }
 
