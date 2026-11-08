@@ -1,3 +1,8 @@
-SportsH v2.2.3
-Nguồn: https://thtt.pages.dev/tttt.m3u (~500+ m3u8)
-Map group → Giờ Vàng, Cola, Gà Vàng, Xôi Lạc, Chuối Chiên, Sao Kê, Sút Bóng, Vua Sân Cỏ…
+SportsH v2.2.8 — Audit P0 close-out (SH-29..33)
+- live_fetched_at / fixtures_fetched_at tách khỏi updated_at
+- Fixtures theo ngày: tối đa ~ mỗi 6h (không 288/ngày)
+- Live API: throttle 25p theo live_fetched_at; lỗi không refresh timestamp
+- Score overlay: chỉ football; league một phía → không ghép
+- channelToMatch: postponed/cancelled → _statusDetail
+- validateStreamUrl: pathname must endswith .m3u8
+(+ v2.2.6 Cola scores, v2.2.7 live minute clock)

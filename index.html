@@ -1190,7 +1190,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.2.3";
+    const APP_VERSION = "2.2.8";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1262,26 +1262,64 @@
       if (!scoreOverlay.length) return null;
       const h = normScoreKey((m.home_team && m.home_team.name) || m.home_team_name);
       const a = normScoreKey((m.away_team && m.away_team.name) || m.away_team_name);
-      if (!h || !a) return null;
+      if (!h || !a || h.length < 2 || a.length < 2) return null;
+      // Chỉ bóng đá — API-Football không cover tennis/bida
+      const sp = typeof sportSlug === "function" ? sportSlug(m) : (m.sport_slug || "");
+      if (sp !== "football") return null; // SH-31: không ghép other/unknown
+      let matchTs = NaN;
+      try {
+        const iso = m.start_time || m.startTime;
+        if (iso) matchTs = Date.parse(iso);
+      } catch (_) {}
+      const leagueM = normScoreKey(m.tournament_name || m.league || "");
+      const candidates = [];
       for (const it of scoreOverlay) {
         const ih = normScoreKey(it.home);
         const ia = normScoreKey(it.away);
-        if ((ih === h && ia === a) || (ih === a && ia === h)) return it;
-        // partial: both names contained
-        if (ih && ia && h.includes(ih.split(" ")[0]) && a.includes(ia.split(" ")[0]) && ih.length > 3) {
-          if ((h.includes(ih.slice(0, 5)) || ih.includes(h.slice(0, 5))) &&
-              (a.includes(ia.slice(0, 5)) || ia.includes(a.slice(0, 5)))) return it;
+        if (!ih || !ia) continue;
+        const direct = ih === h && ia === a;
+        const swapped = ih === a && ia === h;
+        if (!direct && !swapped) continue;
+        // Bắt buộc có ngày trên item score khi trận có start_time
+        if (Number.isFinite(matchTs) && it.date) {
+          const d1 = Date.parse(String(it.date).slice(0, 10) + "T12:00:00Z");
+          if (!Number.isFinite(d1) || Math.abs(matchTs - d1) > 36 * 3600e3) continue;
+        } else if (Number.isFinite(matchTs) && !it.date) {
+          continue; // thiếu ngày phía score → không ghép
         }
+        // SH-34: có tên giải một phía → bắt buộc phía kia + token chung
+        const leagueS = normScoreKey(it.league || "");
+        if ((leagueM && !leagueS) || (!leagueM && leagueS)) continue;
+        if (leagueM && leagueS) {
+          const tm = new Set(leagueM.split(" ").filter((w) => w.length > 2));
+          const ts = new Set(leagueS.split(" ").filter((w) => w.length > 2));
+          let overlap = false;
+          for (const w of tm) if (ts.has(w)) { overlap = true; break; }
+          if (!overlap) continue;
+        }
+        candidates.push({ item: it, swapped: !!swapped });
       }
-      return null;
+      // Không đủ điều kiện hoặc mơ hồ (nhiều ứng viên) → không ghép
+      if (candidates.length !== 1) return null;
+      return candidates[0];
     }
     function applyScoreOverlay(m) {
       const hit = findScoreOverlay(m);
       if (!hit) return m;
+      const it = hit.item;
       const out = Object.assign({}, m);
-      if (hit.home_score != null) out.home_score = hit.home_score;
-      if (hit.away_score != null) out.away_score = hit.away_score;
-      if (hit.status === "finished" || hit.status === "FT") out.status = "finished";
+      if (it.home_score != null && it.away_score != null) {
+        if (hit.swapped) {
+          out.home_score = it.away_score;
+          out.away_score = it.home_score;
+        } else {
+          out.home_score = it.home_score;
+          out.away_score = it.away_score;
+        }
+      }
+      const st = String(it.status || it.api_status || "").toUpperCase();
+      if (st === "FINISHED" || st === "FT" || st === "AET" || st === "PEN") out.status = "finished";
+      else if (st === "LIVE" || st === "1H" || st === "2H" || st === "HT" || st === "ET") out.status = "live";
       out._scoreSource = "api-football";
       return out;
     }
@@ -1420,9 +1458,9 @@
     /** Host stream được chấp nhận (suffix match). Rỗng suffix = chặn hết nếu STRICT. */
     const STREAM_HOST_ALLOW = [
       "cdnfastter.xyz", "livecdn321.cdnfastter.xyz", "xoiche.live",
-      "ebaclofen.org", "gvapi.cc", "gavang", "cloudfront.net",
-      "akamaized.net", "edgesuite.net", "mpegts", "hls",
-      "onrender.com", "workers.dev", "cloudflare", "fastly"
+      "ebaclofen.org", "gvapi.cc", "cloudfront.net",
+      "akamaized.net", "edgesuite.net",
+      "onrender.com", "workers.dev", "losartang.org"
     ];
     // Cho phép thêm host phổ biến CDN thể thao VN; nới lỏng: nếu không khớp allow vẫn OK nếu không private
     const STREAM_HOST_STRICT = false;
@@ -1430,11 +1468,12 @@
     function hostAllowed(hostname) {
       const h = String(hostname || "").toLowerCase();
       if (!h) return false;
-      if (STREAM_HOST_STRICT) {
-        return STREAM_HOST_ALLOW.some((a) => h === a || h.endsWith("." + a) || h.includes(a));
-      }
-      // mode mềm: chặn private; allowlist chỉ là ưu tiên (luôn pass public host)
-      return true;
+      if (!STREAM_HOST_STRICT) return true;
+      // Chỉ exact hoặc suffix có ranh giới chấm (tránh attacker.com chứa trusted)
+      return STREAM_HOST_ALLOW.some((a) => {
+        const x = String(a || "").toLowerCase();
+        return h === x || h.endsWith("." + x);
+      });
     }
 
     function validateStreamUrl(u) {
@@ -1445,7 +1484,8 @@
         if (x.protocol !== "https:") return "";
         if (!x.hostname || x.username || x.password) return "";
         const path = (x.pathname || "").toLowerCase();
-        if (!path.endsWith(".m3u8") && !s.toLowerCase().includes(".m3u8")) return "";
+        // SH-33: chỉ pathname kết thúc .m3u8 (không tin query ?file=x.m3u8)
+        if (!path.endsWith(".m3u8")) return "";
         const h = x.hostname.toLowerCase();
         if (
           h === "localhost" || h === "127.0.0.1" || h === "::1" ||
@@ -1463,6 +1503,45 @@
       } catch (_) {
         return "";
       }
+    }
+
+    /** Đồng hồ LIVE: phút trận (API) hoặc ước lượng từ giờ bắt đầu */
+    function liveMatchClock(m) {
+      const mt = m.match_time;
+      if (mt != null && mt !== "") {
+        const n = Number(mt);
+        if (Number.isFinite(n) && n >= 0 && n < 200) return n + "'";
+        const s = String(mt).trim();
+        // Nhãn chuẩn từ API
+        if (/^(HT|FT|ET|PEN|LIVE)$/i.test(s)) return s.toUpperCase();
+        if (/^\d{1,3}\+\d{1,2}$/.test(s)) return s + "'";
+        if (/^\d{1,3}'$/.test(s)) return s;
+        // Bỏ nhãn kiểu "10:10 - 08/11" — không phải phút trận
+        if (/\d{1,2}:\d{2}/.test(s) || /\d{1,2}\/\d{1,2}/.test(s)) {
+          /* fall through */
+        } else if (s && s.length <= 12) {
+          return s;
+        }
+      }
+      const iso = m.start_time;
+      if (!iso) return "LIVE";
+      const t0 = Date.parse(iso);
+      if (!Number.isFinite(t0)) return "LIVE";
+      let mins = Math.floor((Date.now() - t0) / 60000);
+      if (mins < 0) return "LIVE";
+      const sp = typeof sportSlug === "function" ? sportSlug(m) : (m.sport_slug || "football");
+      // Bóng đá: ước phút thi đấu (trừ ~15' nghỉ giữa hiệp khi > 45)
+      if (sp === "football" || sp === "other" || !sp) {
+        if (mins <= 45) return mins + "'";
+        if (mins <= 60) return "HT";
+        let m2 = mins - 15; // trừ nghỉ giữa hiệp (ước lượng)
+        if (m2 <= 90) return Math.min(m2, 90) + "'";
+        if (m2 <= 105) return "90+'";
+        return "FT";
+      }
+      // Môn khác: hiện phút tường (wall-clock)
+      if (mins > 300) return "LIVE";
+      return mins + "'";
     }
 
     function fmtTime(iso) {
@@ -1714,11 +1793,19 @@
 
       let homeScore = ch.home_score != null ? ch.home_score : null;
       let awayScore = ch.away_score != null ? ch.away_score : null;
+      let statusDetail = "";
       if (ch.match_status) {
         const ms = String(ch.match_status).toLowerCase();
         if (ms === "live" || ms === "playing") status = "live";
         else if (ms === "finished" || ms === "ft") status = "finished";
         else if (ms === "scheduled") status = "scheduled";
+        else if (ms === "postponed" || ms === "hoan" || ms === "hoãn") {
+          status = "finished";
+          statusDetail = "postponed";
+        } else if (ms === "cancelled" || ms === "canceled" || ms === "huy" || ms === "hủy") {
+          status = "finished";
+          statusDetail = "cancelled";
+        }
       }
       if (ch.start_time && !startIso) startIso = ch.start_time;
 
@@ -1741,7 +1828,8 @@
         primary_stream_url: streamUrl || (src === "soop_bida" ? (ch.url || "") : ""),
         commentators: blv ? [{ name: blv, stream_url: streamUrl }] : (srcLabel ? [{ name: srcLabel, stream_url: streamUrl }] : []),
         views_count: 0,
-        start_time: startIso
+        start_time: startIso,
+        _statusDetail: statusDetail || undefined
       };
     }
 
@@ -1809,6 +1897,22 @@
             scoreOverlay = scoresRaw;
           }
           let extra = (extraRaw || []).map((ch, i) => channelToMatch(ch, i)).filter(Boolean);
+          // P0 Data freshness: bỏ stream ngoài quá hạn (finished > 6h, scheduled > 36h tới / không có giờ)
+          const nowMs = Date.now();
+          extra = extra.filter((m) => {
+            // Hoãn / hủy: không đưa vào danh sách xem
+            if (m._statusDetail === "postponed" || m._statusDetail === "cancelled") return false;
+            const st = String(m.status || "").toLowerCase();
+            const t0 = m.start_time ? Date.parse(m.start_time) : NaN;
+            // Không có giờ: chỉ giữ khi nguồn ghi rõ live (không suy từ đồng hồ)
+            if (!Number.isFinite(t0)) return st === "live";
+            const diffH = (nowMs - t0) / 3600000;
+            if (st === "finished") return diffH <= 6;
+            if (st === "live") return diffH >= -0.25 && diffH <= 5;
+            if (st === "scheduled") return diffH >= -36 && diffH <= 0.5;
+            // status lạ: cửa sổ hẹp
+            return diffH >= -36 && diffH <= 6;
+          });
           // Gộp trận trùng (cùng giờ + đội) — tránh 2 bản ghi API lệch tên
           extra = dedupeExternalMatches(extra);
           if (local && local.results && local.results.length) {
@@ -2188,18 +2292,16 @@
         const asRaw = m.away_score ?? m.awayScore;
         const hs = (hsRaw === null || hsRaw === undefined || hsRaw === "") ? "–" : hsRaw;
         const as = (asRaw === null || asRaw === undefined || asRaw === "") ? "–" : asRaw;
-        // match_time API: số phút (77) hoặc "Live" / "HT"
+        // LIVE: ưu tiên phút trận từ API; không có thì ước từ start_time
         let clock = "";
         if (cat === "live") {
-          const mt = m.match_time;
-          if (mt != null && mt !== "") {
-            const n = Number(mt);
-            clock = Number.isFinite(n) ? (n + "'") : String(mt);
-          }
+          clock = liveMatchClock(m);
         } else if (cat === "soon") {
           clock = fmtTime(m.start_time);
         } else {
-          clock = m.match_time ? String(m.match_time) : "";
+          // Đã kết thúc: hiện giờ bắt đầu (ngắn), không hiện nhãn kickoff dài kiểu M3U
+          if (m.start_time) clock = fmtTime(m.start_time);
+          else if (m.match_time && !/\d{1,2}:\d{2}/.test(String(m.match_time))) clock = String(m.match_time);
         }
         let league = m.tournament?.name || m.tournament_name || m.sport?.name || m.sport_name || "";
         const srcLabelClean = SRC_LABELS[m._source || ""] || "";
