@@ -315,7 +315,19 @@ jobs:
               n = 0
               for ch in items:
                   u = ch.get("url") or ""
-                  if not u or u in seen:
+                  if not u:
+                      continue
+                  if u in seen:
+                      # Cập nhật nếu bản mới có tỷ số mà bản cũ không
+                      for i, old in enumerate(all_ch):
+                          if (old.get("url") or "") == u:
+                              if old.get("home_score") is None and ch.get("home_score") is not None:
+                                  all_ch[i] = dict(old)
+                                  for k in ("home_score", "away_score", "match_status", "start_time", "name"):
+                                      if ch.get(k) is not None:
+                                          all_ch[i][k] = ch.get(k)
+                                  n += 1
+                              break
                       continue
                   seen.add(u)
                   all_ch.append(ch)
@@ -438,8 +450,8 @@ jobs:
                       elif any(x in g for x in ("giờ vàng", "giovang", "gio vang", "vàng tv")):
                           src = "giovang"
                       else:
-                          # thể thao chung từ hub → gắn giovang (cùng pipeline Giờ Vàng)
-                          src = "giovang"
+                          # Không đoán thương hiệu — gắn thtt
+                          src = "thtt"
                       before = len(seen)
                       add_items([{
                           "name": cur_name,
@@ -466,6 +478,16 @@ jobs:
                   rows = blob
               else:
                   rows = []
+              def cola_score(arr):
+                  if isinstance(arr, list) and arr:
+                      try:
+                          return int(arr[0])
+                      except Exception:
+                          return None
+                  if isinstance(arr, (int, float)):
+                      return int(arr)
+                  return None
+
               for row in rows:
                   if not isinstance(row, dict):
                       continue
@@ -473,6 +495,29 @@ jobs:
                   away = row.get("awayTeamName") or "?"
                   league = row.get("competitionName") or "Cola"
                   logo = row.get("homeTeamLogo") or row.get("competitionLogo") or ""
+                  hs = cola_score(row.get("homeScore"))
+                  aws = cola_score(row.get("awayScore"))
+                  # matchStatus: 1 scheduled, 2 live, 3 finished (quan sát thực tế API)
+                  ms_code = row.get("matchStatus")
+                  if ms_code == 2:
+                      mstatus = "live"
+                  elif ms_code == 3:
+                      mstatus = "finished"
+                  else:
+                      mstatus = "scheduled"
+                  start_iso = None
+                  mt = row.get("matchTime")
+                  if isinstance(mt, (int, float)) and mt > 1e9:
+                      start_iso = datetime.fromtimestamp(int(mt), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                  # nhãn giờ VN trong name để channelToMatch parse
+                  time_label = ""
+                  if start_iso:
+                      try:
+                          from datetime import timedelta
+                          vn = datetime.fromtimestamp(int(mt), tz=timezone.utc) + timedelta(hours=7)
+                          time_label = vn.strftime("%H:%M - %d/%m")
+                      except Exception:
+                          time_label = ""
                   urls = []
                   vu = row.get("videoUrl") or ""
                   if isinstance(vu, str) and ".m3u8" in vu:
@@ -491,7 +536,10 @@ jobs:
                           if isinstance(a, dict) and (a.get("playStreamAddress2") == u or a.get("playStreamAddress") == u):
                               blv = a.get("nickName") or ""
                               break
-                      name = f"{home} VS {away}"
+                      if time_label:
+                          name = f"{time_label} | {home} VS {away}"
+                      else:
+                          name = f"{home} VS {away}"
                       if blv:
                           name += f" | {blv}"
                       items.append({
@@ -500,6 +548,10 @@ jobs:
                           "logo": logo if isinstance(logo, str) else "",
                           "source": "cola",
                           "url": u,
+                          "home_score": hs,
+                          "away_score": aws,
+                          "match_status": mstatus,
+                          "start_time": start_iso,
                       })
               add_items(items, "cola-api-cltvlv")
               print("OK cola-api-cltvlv", len(items))
@@ -912,23 +964,37 @@ jobs:
               s = "".join(c for c in s if unicodedata.category(c) != "Mn")
               return re.sub(r"[^a-z0-9]+", " ", s).strip()
 
-          # Lấy fixtures hôm nay + hôm qua (FT + live) — tiết kiệm quota
+          # SH-29/30: tách timestamp + giảm quota
           items = []
           seen = set()
           today = datetime.now(timezone.utc).date()
-          for delta in (0, -1):
-              day = (today + timedelta(days=delta)).isoformat()
-              for status in (None, "FT", "AET", "PEN"):
-                  params = {"date": day}
-                  if status:
-                      params["status"] = status
+          request_count = 0
+          live_fetched_at = prev.get("live_fetched_at")
+          fixtures_fetched_at = prev.get("fixtures_fetched_at")
+
+          def age_minutes(ts):
+              if not ts:
+                  return 1e9
+              try:
+                  from datetime import datetime as _dt
+                  pt = _dt.strptime(str(ts).replace("Z", "").split(".")[0], "%Y-%m-%dT%H:%M:%S")
+                  return (datetime.utcnow() - pt).total_seconds() / 60.0
+              except Exception:
+                  return 1e9
+
+          # Fixtures theo ngày: chỉ gọi nếu chưa có hoặc > 6 giờ (không 288 req/ngày)
+          fetch_fixtures = age_minutes(fixtures_fetched_at) >= 360 or not (prev.get("items") or [])
+          if fetch_fixtures:
+              for delta in (0, -1):
+                  day = (today + timedelta(days=delta)).isoformat()
                   try:
-                      data = api_get("/fixtures", params)
+                      data = api_get("/fixtures", {"date": day})
+                      request_count += 1
                   except Exception as e:
-                      print("API err", day, status, e)
+                      print("API err", day, e)
                       continue
                   resp = data.get("response") or []
-                  print("fixtures", day, status or "all", len(resp))
+                  print("fixtures", day, len(resp))
                   for row in resp:
                       fx = row.get("fixture") or {}
                       teams = row.get("teams") or {}
@@ -955,54 +1021,97 @@ jobs:
                           "date": day,
                           "league": ((row.get("league") or {}).get("name")) or "",
                           "api_status": st,
+                          "fixture_id": fx.get("id"),
                       })
-                  time.sleep(0.35)  # nhẹ nhàng với rate limit
+                  time.sleep(0.35)
+              fixtures_fetched_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+          else:
+              print("SKIP fixtures by date — age_min", round(age_minutes(fixtures_fetched_at), 1))
+              # giữ items không-live từ snapshot trước
+              for it in prev.get("items") or []:
+                  if it.get("status") != "live":
+                      key = norm(it.get("home")) + "|" + norm(it.get("away")) + "|" + str(it.get("date") or "")
+                      if key not in seen:
+                          seen.add(key)
+                          items.append(it)
 
-          # Live snapshot riêng (nếu còn quota)
-          try:
-              data = api_get("/fixtures", {"live": "all"})
-              for row in data.get("response") or []:
-                  fx = row.get("fixture") or {}
-                  teams = row.get("teams") or {}
-                  goals = row.get("goals") or {}
-                  home = ((teams.get("home") or {}).get("name")) or ""
-                  away = ((teams.get("away") or {}).get("name")) or ""
-                  if not home or not away:
-                      continue
-                  day = (fx.get("date") or "")[:10]
-                  key = norm(home) + "|" + norm(away) + "|" + day
-                  if key in seen:
-                      # cập nhật score live
-                      for it in items:
-                          if norm(it["home"]) == norm(home) and norm(it["away"]) == norm(away):
-                              it["home_score"] = goals.get("home")
-                              it["away_score"] = goals.get("away")
-                              it["status"] = "live"
-                              it["api_status"] = ((fx.get("status") or {}).get("short")) or it.get("api_status")
-                              break
-                      continue
-                  seen.add(key)
-                  items.append({
-                      "home": home,
-                      "away": away,
-                      "home_score": goals.get("home"),
-                      "away_score": goals.get("away"),
-                      "status": "live",
-                      "date": day,
-                      "league": ((row.get("league") or {}).get("name")) or "",
-                      "api_status": ((fx.get("status") or {}).get("short")) or "",
-                  })
-              print("live fixtures merged", len(data.get("response") or []))
-          except Exception as e:
-              print("live fetch skip", e)
+          # Live: throttle theo live_fetched_at (KHÔNG dùng updated_at)
+          fetch_live = age_minutes(live_fetched_at) >= 25
+          if not fetch_live:
+              print("SKIP live endpoint — live_fetched_at age", round(age_minutes(live_fetched_at), 1), "min < 25")
+              for it in prev.get("items") or []:
+                  if it.get("status") == "live":
+                      key = norm(it.get("home")) + "|" + norm(it.get("away")) + "|" + str(it.get("date") or "")
+                      if key not in seen:
+                          seen.add(key)
+                          items.append(it)
+                      else:
+                          # cập nhật score từ bản live cũ vào items
+                          for j, cur in enumerate(items):
+                              if norm(cur.get("home")) == norm(it.get("home")) and norm(cur.get("away")) == norm(it.get("away")):
+                                  if it.get("home_score") is not None:
+                                      items[j] = dict(cur)
+                                      items[j]["home_score"] = it.get("home_score")
+                                      items[j]["away_score"] = it.get("away_score")
+                                      items[j]["status"] = "live"
+                                      items[j]["api_status"] = it.get("api_status") or items[j].get("api_status")
+                                  break
+          else:
+              try:
+                  data = api_get("/fixtures", {"live": "all"})
+                  request_count += 1
+                  for row in data.get("response") or []:
+                      fx = row.get("fixture") or {}
+                      teams = row.get("teams") or {}
+                      goals = row.get("goals") or {}
+                      home = ((teams.get("home") or {}).get("name")) or ""
+                      away = ((teams.get("away") or {}).get("name")) or ""
+                      if not home or not away:
+                          continue
+                      day = (fx.get("date") or "")[:10]
+                      key = norm(home) + "|" + norm(away) + "|" + day
+                      fid = fx.get("id")
+                      if key in seen:
+                          for it in items:
+                              if norm(it["home"]) == norm(home) and norm(it["away"]) == norm(away):
+                                  it["home_score"] = goals.get("home")
+                                  it["away_score"] = goals.get("away")
+                                  it["status"] = "live"
+                                  it["api_status"] = ((fx.get("status") or {}).get("short")) or it.get("api_status")
+                                  if fid:
+                                      it["fixture_id"] = fid
+                                  break
+                          continue
+                      seen.add(key)
+                      items.append({
+                          "home": home,
+                          "away": away,
+                          "home_score": goals.get("home"),
+                          "away_score": goals.get("away"),
+                          "status": "live",
+                          "date": day,
+                          "league": ((row.get("league") or {}).get("name")) or "",
+                          "api_status": ((fx.get("status") or {}).get("short")) or "",
+                          "fixture_id": fid,
+                      })
+                  live_fetched_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                  print("live fixtures merged", len(data.get("response") or []))
+              except Exception as e:
+                  print("live fetch skip", e)
+                  # không cập nhật live_fetched_at khi lỗi
 
-          # Quality: không ghi rỗng nếu trước đó có data
+          print("API-Football request_count", request_count)
+
+                    # Quality: không ghi rỗng nếu trước đó có data
           if not items and prev.get("items"):
               print("WARN: API-Football empty — keep previous scores.json")
               raise SystemExit(0)
 
           out = {
               "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "fixtures_fetched_at": fixtures_fetched_at,
+              "live_fetched_at": live_fetched_at,
+              "request_count": request_count,
               "count": len(items),
               "source": "api-football",
               "items": items,
