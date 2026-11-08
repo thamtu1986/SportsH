@@ -1,5 +1,3 @@
-SportsH v2.1.5 — full source review
-- channels.json refreshed from adviceme (Dong Nai vs SHB Da Nang)
-- Frontend dedupe external matches (team+time)
-- Header Actions button layout
-- Gà Vàng API priority (workflow) retained from 2.1.4
+SportsH v2.2.3
+Nguồn: https://thtt.pages.dev/tttt.m3u (~500+ m3u8)
+Map group → Giờ Vàng, Cola, Gà Vàng, Xôi Lạc, Chuối Chiên, Sao Kê, Sút Bóng, Vua Sân Cỏ…

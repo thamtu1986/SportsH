@@ -138,14 +138,30 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .card-bottom-action {
-      margin-left: 4px;
-    }
-    .card-bottom-action {
-      flex: 0 0 auto;
-      display: flex;
+    .fs-link {
+      display: inline-flex;
       align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: color .15s, border-color .15s;
+    }
+    .fs-link:hover { color: #fff; border-color: var(--accent); }
+    .card-bottom-action {
+      display: flex;
+      flex-wrap: wrap;
       gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+      flex: 0 0 auto;
+    }
+    .card-bottom-action .watch-btn {
+      flex: 0 0 auto;
     }
     .card .blv-row {
       margin-top: 0;
@@ -370,10 +386,11 @@
       background: var(--bg3);
     }
     .tab.sport-tab.active {
-      background: linear-gradient(135deg, #ff1744, #ff5252);
+      /* fallback nếu môn không có màu riêng */
+      background: linear-gradient(135deg, #37474f, #546e7a);
       border-color: transparent;
       color: #fff;
-      box-shadow: 0 4px 18px rgba(255,23,68,.35);
+      box-shadow: 0 4px 16px rgba(55,71,79,.3);
     }
     /* Status tabs – màu riêng */
     .tab[data-tab="live"].active {
@@ -467,6 +484,71 @@
       color: #fff;
     }
     .tab.sport-tab.active .live-tag { background: rgba(255,255,255,.25); }
+
+    /* Sport tabs — màu active theo môn (ưu tiên nhận diện) */
+    .tab.sport-tab[data-sport="all"].active {
+      background: linear-gradient(135deg, #2979ff, #40c4ff);
+      border-color: transparent; color: #fff;
+      box-shadow: 0 4px 16px rgba(41,121,255,.35);
+    }
+    .tab.sport-tab[data-sport="football"].active {
+      background: linear-gradient(135deg, #00c853, #69f0ae);
+      border-color: transparent; color: #04120a;
+      box-shadow: 0 4px 16px rgba(0,200,83,.35);
+    }
+    .tab.sport-tab[data-sport="basketball"].active {
+      background: linear-gradient(135deg, #ef6c00, #ffb74d);
+      border-color: transparent; color: #fff;
+      box-shadow: 0 4px 16px rgba(239,108,0,.35);
+    }
+    .tab.sport-tab[data-sport="tennis"].active {
+      background: linear-gradient(135deg, #c0ca33, #f0f4c3);
+      border-color: transparent; color: #1b5e20;
+      box-shadow: 0 4px 16px rgba(192,202,51,.35);
+    }
+    .tab.sport-tab[data-sport="volleyball"].active {
+      background: linear-gradient(135deg, #00897b, #4db6ac);
+      border-color: transparent; color: #fff;
+      box-shadow: 0 4px 16px rgba(0,137,123,.3);
+    }
+    .tab.sport-tab[data-sport="esports"].active {
+      background: linear-gradient(135deg, #7c4dff, #b388ff);
+      border-color: transparent; color: #fff;
+      box-shadow: 0 4px 16px rgba(124,77,255,.35);
+    }
+    .tab.sport-tab[data-sport="snooker"].active {
+      background: linear-gradient(135deg, #1565c0, #42a5f5);
+      border-color: transparent; color: #fff;
+      box-shadow: 0 4px 16px rgba(21,101,192,.35);
+    }
+    .tab.sport-tab[data-sport="badminton"].active,
+    .tab.sport-tab[data-sport="tabletennis"].active {
+      background: linear-gradient(135deg, #00838f, #4dd0e1);
+      border-color: transparent; color: #fff;
+    }
+    .tab.sport-tab[data-sport="other"].active {
+      background: linear-gradient(135deg, #546e7a, #90a4ae);
+      border-color: transparent; color: #fff;
+    }
+    .tab[data-source="xoilac"].active {
+      background: linear-gradient(135deg, #6d4c41, #a1887f);
+      border-color: transparent; color: #fff;
+    }
+    .tab[data-source="chuoichien"].active {
+      background: linear-gradient(135deg, #f9a825, #fff176);
+      border-color: transparent; color: #3e2723;
+    }
+    .tab[data-source="soop_bida"].active {
+      background: linear-gradient(135deg, #1565c0, #42a5f5);
+      border-color: transparent; color: #fff;
+      box-shadow: 0 4px 16px rgba(21,101,192,.3);
+    }
+    /* Tab môn ưu tiên (top) hơi nổi hơn */
+    .tab.sport-tab.priority {
+      border-color: #2a3a4d;
+      font-weight: 700;
+    }
+
 
     /* Search */
     .search-wrap {
@@ -1013,9 +1095,16 @@
     <div class="tabs" id="sourceTabs">
       <button class="tab active" data-source="all">Mọi nguồn</button>
       <button class="tab" data-source="xoiche">Xoiche</button>
-      <button class="tab" data-source="giovang">Giờ Vàng</button>
       <button class="tab" data-source="gavang">Gà Vàng</button>
+      <button class="tab" data-source="giovang">Giờ Vàng</button>
       <button class="tab" data-source="cola">Cola</button>
+      <button class="tab" data-source="soop_bida">SOOP Bida</button>
+      <button class="tab" data-source="xoilac">Xôi Lạc</button>
+      <button class="tab" data-source="chuoichien">Chuối Chiên</button>
+      <button class="tab" data-source="saoke">Sao Kê</button>
+      <button class="tab" data-source="sutbong">Sút Bóng</button>
+      <button class="tab" data-source="vuasan">Vua Sân Cỏ</button>
+      <button class="tab" data-source="thtt">THTT khác</button>
       <button class="tab" data-source="phalang">PhaLang</button>
       <button class="tab" data-source="hoiquan">Hội Quán</button>
       <button class="tab" data-source="thiendinh">Thiên Đình</button>
@@ -1101,7 +1190,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.1.7";
+    const APP_VERSION = "2.2.3";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1131,6 +1220,13 @@
       const src = (m && m._source) || "xoiche";
       if (src === "gavang") return { label: "Gà Vàng", url: "https://gavang1.xyz/" };
       if (src === "cola") return { label: "Cola", url: "https://colatv.watch/" };
+      if (src === "soop_bida") {
+        const u = m && m.primary_stream_url;
+        return {
+          label: "SOOP Bida",
+          url: (u && String(u).includes("billiards.sooplive")) ? u : "https://billiards.sooplive.com/schedule"
+        };
+      }
       if (src === "xoiche") {
         const id = m && m.id;
         return {
@@ -1142,6 +1238,52 @@
       }
       // giovang / phalang / … — không có trang xem online ổn định
       return null;
+    }
+
+    /** Flashscore search — tỷ số / thống kê trên site gốc */
+    function flashscoreUrl(m) {
+      const home = (m.home_team && m.home_team.name) || m.home_team_name || "";
+      const away = (m.away_team && m.away_team.name) || m.away_team_name || "";
+      const q = (home + " " + away).trim();
+      if (!q || q === "?") return "https://www.flashscore.vn/";
+      return "https://www.flashscore.vn/search/?q=" + encodeURIComponent(q);
+    }
+
+    /** scores.json từ workflow (API-Football) — merge tỷ số thật */
+    let scoreOverlay = [];
+    function normScoreKey(s) {
+      return String(s || "")
+        .toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+    }
+    function findScoreOverlay(m) {
+      if (!scoreOverlay.length) return null;
+      const h = normScoreKey((m.home_team && m.home_team.name) || m.home_team_name);
+      const a = normScoreKey((m.away_team && m.away_team.name) || m.away_team_name);
+      if (!h || !a) return null;
+      for (const it of scoreOverlay) {
+        const ih = normScoreKey(it.home);
+        const ia = normScoreKey(it.away);
+        if ((ih === h && ia === a) || (ih === a && ia === h)) return it;
+        // partial: both names contained
+        if (ih && ia && h.includes(ih.split(" ")[0]) && a.includes(ia.split(" ")[0]) && ih.length > 3) {
+          if ((h.includes(ih.slice(0, 5)) || ih.includes(h.slice(0, 5))) &&
+              (a.includes(ia.slice(0, 5)) || ia.includes(a.slice(0, 5)))) return it;
+        }
+      }
+      return null;
+    }
+    function applyScoreOverlay(m) {
+      const hit = findScoreOverlay(m);
+      if (!hit) return m;
+      const out = Object.assign({}, m);
+      if (hit.home_score != null) out.home_score = hit.home_score;
+      if (hit.away_score != null) out.away_score = hit.away_score;
+      if (hit.status === "finished" || hit.status === "FT") out.status = "finished";
+      out._scoreSource = "api-football";
+      return out;
     }
 
     async function fetchSameOriginJson(path) {
@@ -1203,14 +1345,15 @@
     async function fetchLocalChannels() {
       const data = await fetchSameOriginJson(LOCAL_CHANNELS);
       if (!data) return [];
-      // Ưu tiên streams (schema mới); fallback channels / mảng thuần
       const list = data.streams || data.channels || data;
-      if (!Array.isArray(list)) return [];
-      // Chỉ giữ mục có type stream hoặc URL .m3u8 hợp lệ (bỏ event_link)
-      return list.filter((ch) => {
+      const events = Array.isArray(data.event_links) ? data.event_links : [];
+      const streams = Array.isArray(list) ? list.filter((ch) => {
         if (ch && ch.type === "event_link") return false;
         return !!validateStreamUrl(ch && ch.url);
-      });
+      }) : [];
+      // event_link (SOOP Bida…): lịch/điểm, không cần m3u8
+      const ev = events.filter((ch) => ch && (ch.source === "soop_bida" || (ch.url || "").includes("billiards.sooplive")));
+      return streams.concat(ev);
     }
 
     const SPORT_LABELS = {
@@ -1228,13 +1371,17 @@
       boxing: "🥊 Quyền Anh",
       mma: "🥋 MMA",
       golf: "⛳ Golf",
-      snooker: "🎱 Bi-a",
+      snooker: "🎱 Bida",
       esports: "🎮 Esports",
       other: "🏅 Khác"
     };
     const SRC_LABELS = {
       giovang: "Giờ Vàng", gavang: "Gà Vàng", cola: "Cola", phalang: "PhaLang",
-      hoiquan: "Hội Quán", thiendinh: "Thiên Đình", vongcam: "Vòng Cấm", xoiche: "Xoiche"
+      hoiquan: "Hội Quán", thiendinh: "Thiên Đình", vongcam: "Vòng Cấm", xoiche: "Xoiche",
+      soop_bida: "SOOP Bida",
+      xoilac: "Xôi Lạc", chuoichien: "Chuối Chiên", saoke: "Sao Kê",
+      sutbong: "Sút Bóng", biaom: "Bia Ôm", vuasan: "Vua Sân Cỏ", s8tv: "S8 TV",
+      thtt: "THTT"
     };
 
     const grid = document.getElementById("grid");
@@ -1352,8 +1499,8 @@
     function hardLiveMaxMin(m) {
       const sp = typeof sportSlug === "function" ? sportSlug(m) : "football";
       if (sp === "basketball") return 240;
-      if (sp === "tennis") return 360;
-      return 210; // bóng đá kể cả hiệp phụ + penalty (~3.5h)
+      if (sp === "tennis") return 210; // best of 3 ~ 1.5–3h; treo 0-0 quá lâu → done
+      return 210;
     }
 
     function classify(m) {
@@ -1397,6 +1544,14 @@
       // API báo đang live (kể cả hiệp phụ): giữ LIVE, chỉ cắt khi quá trần cứng
       if (hasApiLive && !isExternal) {
         if (diffMin != null && diffMin > hardLiveMaxMin(m)) return "done";
+        // Tennis/Xoiche: hay treo status=live + 0-0 sau khi trận đã kết thúc
+        const sp = typeof sportSlug === "function" ? sportSlug(m) : "";
+        if (sp === "tennis" && diffMin != null && diffMin > 120) {
+          const hs = m.home_score ?? m.homeScore;
+          const as = m.away_score ?? m.awayScore;
+          const zeroish = (v) => v === 0 || v === "0" || v == null || v === "";
+          if (zeroish(hs) && zeroish(as)) return "done";
+        }
         return "live";
       }
 
@@ -1549,13 +1704,25 @@
       const low = (name + " " + (league || "") + " " + (ch.group || "")).toLowerCase();
       let sport_slug = detectSportFromText(low);
       if (!sport_slug) {
-        // Không mặc định football nếu tên có dấu hiệu game/esports
-        const maybeGame = /cs2|cs:?go|dota|valorant|esport|iem|game|console|joystick/i.test(low);
+        const maybeGame = /cs2|cs:?go|dota|valorant|esport|iem\b|game|console|joystick/i.test(low);
         if (maybeGame) sport_slug = "esports";
+        else if (src === "soop_bida" || /billiard|bida|3[\s-]?cushion/.test(low)) sport_slug = "snooker";
         else if (["gavang", "cola", "giovang"].includes(src)) sport_slug = "football";
         else sport_slug = "other";
       }
+      if (src === "soop_bida") sport_slug = "snooker";
 
+      let homeScore = ch.home_score != null ? ch.home_score : null;
+      let awayScore = ch.away_score != null ? ch.away_score : null;
+      if (ch.match_status) {
+        const ms = String(ch.match_status).toLowerCase();
+        if (ms === "live" || ms === "playing") status = "live";
+        else if (ms === "finished" || ms === "ft") status = "finished";
+        else if (ms === "scheduled") status = "scheduled";
+      }
+      if (ch.start_time && !startIso) startIso = ch.start_time;
+
+      const streamUrl = validateStreamUrl(ch.url) ? ch.url : "";
       return {
         id: "ch-" + src + "-" + idx,
         _external: true,
@@ -1565,18 +1732,19 @@
         away_team_name: away || "—",
         home_team_logo: ch.logo || "",
         away_team_logo: "",
-        home_score: null,
-        away_score: null,
+        home_score: homeScore,
+        away_score: awayScore,
         match_time: timeLabel,
         tournament_name: (league && league !== srcLabel) ? league : "Thể thao",
         sport_slug,
         sport_name: sport_slug,
-        primary_stream_url: ch.url,
-        commentators: blv ? [{ name: blv, stream_url: ch.url }] : [{ name: srcLabel, stream_url: ch.url }],
+        primary_stream_url: streamUrl || (src === "soop_bida" ? (ch.url || "") : ""),
+        commentators: blv ? [{ name: blv, stream_url: streamUrl }] : (srcLabel ? [{ name: srcLabel, stream_url: streamUrl }] : []),
         views_count: 0,
         start_time: startIso
       };
     }
+
 
     async function fetchMatches() {
       if (fetchInFlight) return fetchInFlight;
@@ -1584,13 +1752,17 @@
       liveDot.style.display = "none";
 
       const applyList = (results, extra, source, meta) => {
-        const notDone = results.filter(m => classify(m) !== "done");
+        // Merge tỷ số API-Football trước khi phân loại LIVE/DONE
+        const base = results.map(applyScoreOverlay);
+        const ext = (extra || []).map(applyScoreOverlay);
+        const isBida = (m) => (m._source === "soop_bida");
+        const notDone = base.filter(m => classify(m) !== "done");
         const liveSoon = notDone.filter(m => {
           const c = classify(m);
-          return c === "live" || c === "soon" || hasWatchableStream(m);
+          return c === "live" || c === "soon" || hasWatchableStream(m) || isBida(m);
         });
-        const done = results.filter(m => classify(m) === "done" && hasWatchableStream(m)).slice(0, 30);
-        allMatches = liveSoon.concat(extra).concat(done);
+        const done = base.filter(m => classify(m) === "done" && (hasWatchableStream(m) || isBida(m))).slice(0, 40);
+        allMatches = liveSoon.concat(ext).concat(done);
 
         // Thời gian: ưu tiên updated_at snapshot / API, không dùng "now" làm timestamp dữ liệu
         const snapIso = (meta && meta.snapshotAt) || lastSnapshotAt;
@@ -1626,10 +1798,16 @@
       fetchInFlight = (async () => {
         try {
           // 1) Local snapshot trước — hiển thị ngay
-          const [local, extraRaw] = await Promise.all([
+          const [local, extraRaw, scoresRaw] = await Promise.all([
             fetchLocalMatches().catch(() => null),
-            fetchLocalChannels().catch(() => [])
+            fetchLocalChannels().catch(() => []),
+            fetchSameOriginJson("scores.json").catch(() => null)
           ]);
+          if (scoresRaw && Array.isArray(scoresRaw.items)) {
+            scoreOverlay = scoresRaw.items;
+          } else if (Array.isArray(scoresRaw)) {
+            scoreOverlay = scoresRaw;
+          }
           let extra = (extraRaw || []).map((ch, i) => channelToMatch(ch, i)).filter(Boolean);
           // Gộp trận trùng (cùng giờ + đội) — tránh 2 bản ghi API lệch tên
           extra = dedupeExternalMatches(extra);
@@ -1820,6 +1998,16 @@
       return "other";
     }
 
+    /** Thứ tự ưu tiên môn (trái → phải). other luôn cuối. */
+    const SPORT_PRIORITY = [
+      "football", "basketball", "tennis", "volleyball",
+      "esports", "snooker",
+      "badminton", "tabletennis", "hockey",
+      "baseball", "handball", "rugby", "cricket",
+      "boxing", "mma", "golf"
+    ];
+    const SPORT_PRIORITY_TOP = new Set(["football", "basketball", "tennis", "volleyball", "esports", "snooker"]);
+
     function updateSportTabs() {
       const counts = {};
       const liveBySport = {};
@@ -1828,19 +2016,26 @@
         counts[s] = (counts[s] || 0) + 1;
         if (classify(m) === "live") liveBySport[s] = (liveBySport[s] || 0) + 1;
       });
-      const fixed = ["football","basketball","volleyball","tennis","hockey","badminton","tabletennis","baseball","handball","rugby","esports","boxing","mma","snooker"];
-      let slugs = fixed.filter(s => counts[s]);
-      const rest = Object.keys(counts).filter(
-        s => !fixed.includes(s) && s !== "other" && /^[a-z0-9_-]{1,32}$/.test(s)
-      );
-      slugs = slugs.concat(rest);
-      if (counts["other"]) slugs.push("other"); // luôn cuối
+      const rank = (s) => {
+        const i = SPORT_PRIORITY.indexOf(s);
+        return i >= 0 ? i : 500;
+      };
+      // Có dữ liệu → sắp theo priority; trong cùng nhóm: đang LIVE lên trước
+      let slugs = Object.keys(counts).filter(s => s !== "other" && /^[a-z0-9_-]{1,32}$/.test(s));
+      slugs.sort((a, b) => {
+        const la = liveBySport[a] ? 0 : 1;
+        const lb = liveBySport[b] ? 0 : 1;
+        if (la !== lb) return la - lb;
+        return rank(a) - rank(b) || a.localeCompare(b);
+      });
+      if (counts["other"]) slugs.push("other");
       if (currentSport !== "all" && !counts[currentSport]) currentSport = "all";
       const wrap = document.getElementById("sportTabs");
       wrap.textContent = "";
       const mkBtn = (sport, label, liveN) => {
         const btn = document.createElement("button");
-        btn.className = "tab sport-tab" + (currentSport === sport ? " active" : "");
+        const top = SPORT_PRIORITY_TOP.has(sport) ? " priority" : "";
+        btn.className = "tab sport-tab" + top + (currentSport === sport ? " active" : "");
         btn.dataset.sport = sport;
         btn.appendChild(document.createTextNode(label || sport));
         if (liveN > 0) {
@@ -1851,7 +2046,8 @@
         }
         wrap.appendChild(btn);
       };
-      mkBtn("all", "Tất cả", 0);
+      const liveAll = Object.values(liveBySport).reduce((a, b) => a + b, 0);
+      mkBtn("all", "Tất cả", liveAll);
       slugs.forEach(s => {
         const label = SPORT_LABELS[s] || ("• " + s);
         mkBtn(s, label, liveBySport[s] || 0);
@@ -2103,6 +2299,7 @@
               <span class="views">${m.views_count ? (esc(m.views_count) + " xem") : ""}</span>
             </div>
             <div class="card-bottom-action">
+              <a class="fs-link" href="${esc(flashscoreUrl(m))}" target="_blank" rel="noopener" data-ext="1" title="Xem tỷ số trên Flashscore">Tỷ số</a>
               <button class="watch-btn${hasLink ? "" : " no-link"}" type="button" ${hasLink ? "" : "disabled"}>${watchLabel}</button>
             </div>
           </div>
