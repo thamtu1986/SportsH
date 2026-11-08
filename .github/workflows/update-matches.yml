@@ -130,6 +130,8 @@ jobs:
               "www.xoiche.live",
               "gavangtv-api.adviceme.io",
               "api.gvapi.cc",
+              "thtt.pages.dev",
+              "billiards.sooplive.com",
           }
 
           def host_allowed(url):
@@ -332,6 +334,178 @@ jobs:
               except Exception as e:
                   print("ERR", k, e)
 
+
+          # 1a) Aggregator thtt.pages.dev — nhiều nguồn kiểu Kienplayer (Giờ Vàng, Cola, Xôi Lạc…)
+          def source_from_group(group, name=""):
+              g = (group + " " + name).lower()
+              if "cola" in g:
+                  return "cola"
+              if "giờ vàng" in g or "giovang" in g or "gio vang" in g:
+                  return "giovang"
+              if "phá làng" in g or "phalang" in g or "pha lang" in g:
+                  return "phalang"
+              if "gà vàng" in g or "ga vang" in g or "khô gà" in g or "kho ga" in g:
+                  return "gavang"
+              if "xôi lạc" in g or "xoi lac" in g or "xôi gấc" in g:
+                  return "xoilac"
+              if "chuối" in g or "chuoi" in g:
+                  return "chuoichien"
+              if "sao kê" in g or "sao ke" in g:
+                  return "saoke"
+              if "sút bóng" in g or "sut bong" in g:
+                  return "sutbong"
+              if "bia ôm" in g or "bia om" in g:
+                  return "biaom"
+              if "vua sân" in g or "vua san" in g:
+                  return "vuasan"
+              if "s8" in g:
+                  return "s8tv"
+              return "thtt"
+
+          try:
+              thtt = get_text("https://thtt.pages.dev/tttt.m3u")
+              import re as _re
+              cur_name, cur_logo, cur_group = None, "", ""
+              items = []
+              for line in thtt.splitlines():
+                  line = line.strip()
+                  if not line or line.startswith("#EXTM3U"):
+                      continue
+                  if line.startswith("#EXTINF"):
+                      cur_logo, cur_group = "", ""
+                      lm = _re.search(r'tvg-logo="([^"]*)"', line)
+                      if lm:
+                          cur_logo = lm.group(1)
+                      gm = _re.search(r'group-title="([^"]*)"', line)
+                      if gm:
+                          cur_group = gm.group(1)
+                      parts = line.split(",", 1)
+                      cur_name = parts[1].strip() if len(parts) > 1 else "Live"
+                      # bỏ dòng meta Updated
+                      if cur_group.lower().startswith("updated") or (cur_name and cur_name.lower().startswith("updated")):
+                          cur_name = None
+                      continue
+                  if line.startswith("http") and cur_name:
+                      url = line.split()[0]
+                      if "no-signal" in url or ".m3u8" not in url.lower():
+                          cur_name = None
+                          continue
+                      src = source_from_group(cur_group, cur_name)
+                      items.append({
+                          "name": cur_name,
+                          "group": cur_group or src,
+                          "logo": cur_logo,
+                          "source": src,
+                          "url": url,
+                      })
+                      cur_name = None
+              add_items(items, "thtt-m3u")
+              print("OK thtt-m3u", len(items))
+          except Exception as e:
+              print("ERR thtt-m3u", e)
+
+
+          # 1b) live.m3u gộp — bổ sung kênh có .m3u8 chưa có (gán nguồn theo group-title)
+          try:
+              live_txt = get_text("https://bongda-1.onrender.com/live.m3u")
+              # tái dùng parse nhưng gán source theo group
+              import re as _re
+              cur_name, cur_logo, cur_group = None, "", ""
+              extra_n = 0
+              for line in live_txt.splitlines():
+                  line = line.strip()
+                  if line.startswith("#EXTINF"):
+                      cur_logo = ""
+                      cur_group = ""
+                      lm = _re.search(r'tvg-logo="([^"]*)"', line)
+                      if lm:
+                          cur_logo = lm.group(1)
+                      gm = _re.search(r'group-title="([^"]*)"', line)
+                      if gm:
+                          cur_group = gm.group(1)
+                      parts = line.split(",", 1)
+                      cur_name = parts[1].strip() if len(parts) > 1 else "Live"
+                  elif line.startswith("http") and cur_name:
+                      url = line.split()[0]
+                      if ".m3u8" not in url.lower():
+                          cur_name = None
+                          continue
+                      g = (cur_group + " " + cur_name).lower()
+                      if any(x in g for x in ("cola", "cltv")):
+                          src = "cola"
+                      elif any(x in g for x in ("pha", "phalang", "phải lang")):
+                          src = "phalang"
+                      elif any(x in g for x in ("giờ vàng", "giovang", "gio vang", "vàng tv")):
+                          src = "giovang"
+                      else:
+                          # thể thao chung từ hub → gắn giovang (cùng pipeline Giờ Vàng)
+                          src = "giovang"
+                      before = len(seen)
+                      add_items([{
+                          "name": cur_name,
+                          "group": cur_group or src,
+                          "logo": cur_logo,
+                          "source": src,
+                          "url": url,
+                      }], "live-hub")
+                      if len(seen) > before:
+                          extra_n += 1
+                      cur_name = None
+              print("live-hub added", extra_n)
+          except Exception as e:
+              print("ERR live-hub", e)
+
+          # 1c) Cola API trực tiếp (api.cltvlv.com) — bổ sung khi M3U thiếu BLV m3u8
+          try:
+              data = get_json("https://api.cltvlv.com/api/matches")
+              blob = data.get("data") if isinstance(data, dict) else data
+              items = []
+              if isinstance(blob, dict):
+                  rows = list(blob.values())
+              elif isinstance(blob, list):
+                  rows = blob
+              else:
+                  rows = []
+              for row in rows:
+                  if not isinstance(row, dict):
+                      continue
+                  home = row.get("homeTeamName") or "?"
+                  away = row.get("awayTeamName") or "?"
+                  league = row.get("competitionName") or "Cola"
+                  logo = row.get("homeTeamLogo") or row.get("competitionLogo") or ""
+                  urls = []
+                  vu = row.get("videoUrl") or ""
+                  if isinstance(vu, str) and ".m3u8" in vu:
+                      urls.append(vu)
+                  for a in row.get("anchorAppointmentVoList") or []:
+                      if not isinstance(a, dict):
+                          continue
+                      for k in ("playStreamAddress2", "playStreamAddress", "streamUrl"):
+                          u = a.get(k) or ""
+                          if isinstance(u, str) and ".m3u8" in u:
+                              urls.append(u)
+                              break
+                  for u in urls:
+                      blv = ""
+                      for a in row.get("anchorAppointmentVoList") or []:
+                          if isinstance(a, dict) and (a.get("playStreamAddress2") == u or a.get("playStreamAddress") == u):
+                              blv = a.get("nickName") or ""
+                              break
+                      name = f"{home} VS {away}"
+                      if blv:
+                          name += f" | {blv}"
+                      items.append({
+                          "name": name,
+                          "group": league,
+                          "logo": logo if isinstance(logo, str) else "",
+                          "source": "cola",
+                          "url": u,
+                      })
+              add_items(items, "cola-api-cltvlv")
+              print("OK cola-api-cltvlv", len(items))
+          except Exception as e:
+              print("ERR cola-api-cltvlv", e)
+
           # 2) API Hội Quán / Thiên Đình / Vòng Cấm
           json_sources = [
               ("hoiquan", "https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished", "Hội Quán"),
@@ -479,6 +653,103 @@ jobs:
               except Exception as e:
                   print("ERR gavang-fallback", e)
 
+
+          # --- SOOP Billiards (lịch + điểm, không m3u8) ---
+          def fetch_soop_billiards():
+              out = []
+              try:
+                  data = get_json("https://billiards.sooplive.com/api/games")
+              except Exception as e:
+                  print("ERR soop-bida games", e)
+                  return out
+              games = data.get("list") or []
+              # Ưu tiên giải đang PLAYING, tối đa 3 giải
+              playing = [g for g in games if (g.get("game_status") or "").upper() == "PLAYING"]
+              if not playing:
+                  playing = games[:2]
+              for g in playing[:3]:
+                  gno = g.get("game_no")
+                  if not gno:
+                      continue
+                  title = g.get("title_en") or g.get("title_ko") or f"Billiards {gno}"
+                  try:
+                      md = get_json(f"https://billiards.sooplive.com/api/game/{gno}/matches")
+                  except Exception as e:
+                      print("ERR soop-bida matches", gno, e)
+                      continue
+                  matches = md.get("match_list") or []
+                  # Giới hạn: live + sắp tới + mới xong trong ngày (tránh hàng trăm trận)
+                  from datetime import datetime, timezone, timedelta
+                  now = datetime.utcnow()
+                  kept = 0
+                  for m in matches:
+                      st = (m.get("match_status") or "").upper()
+                      dt_s = m.get("match_datetime") or ""
+                      try:
+                          dt = datetime.strptime(dt_s[:19], "%Y-%m-%d %H:%M:%S")
+                      except Exception:
+                          dt = None
+                      # giữ: PLAYING/LIVE, hoặc ±36h quanh hiện tại
+                      keep = st in ("PLAYING", "LIVE", "INPLAY", "RUNNING")
+                      if dt:
+                          delta = (dt - now).total_seconds() / 3600
+                          if -12 <= delta <= 36:
+                              keep = True
+                      if not keep:
+                          continue
+                      players = m.get("player_list") or []
+                      if len(players) < 2:
+                          continue
+                      p1 = players[0]
+                      p2 = players[1]
+                      home = p1.get("name_en") or p1.get("nick") or p1.get("name_ko") or "?"
+                      away = p2.get("name_en") or p2.get("nick") or p2.get("name_ko") or "?"
+                      hs = p1.get("total_score")
+                      aws = p2.get("total_score")
+                      logo = p1.get("photo") or g.get("logo_url") or ""
+                      if dt:
+                          time_label = dt.strftime("%H:%M - %d/%m")
+                      else:
+                          time_label = ""
+                      status_map = {
+                          "FINISHED": "finished",
+                          "PLAYING": "live",
+                          "LIVE": "live",
+                          "INPLAY": "live",
+                          "SCHEDULED": "scheduled",
+                          "READY": "scheduled",
+                          "WAITING": "scheduled",
+                      }
+                      mstatus = status_map.get(st, "scheduled")
+                      name = f"{time_label} | {home} VS {away} ({title})" if time_label else f"{home} VS {away} ({title})"
+                      out.append({
+                          "name": name,
+                          "group": title,
+                          "logo": logo if isinstance(logo, str) else "",
+                          "source": "soop_bida",
+                          "type": "event_link",
+                          "url": f"https://billiards.sooplive.com/schedule/{gno}",
+                          "home_score": hs,
+                          "away_score": aws,
+                          "match_status": mstatus,
+                          "start_time": (dt.strftime("%Y-%m-%dT%H:%M:%SZ") if dt else None),
+                      })
+                      kept += 1
+                      if kept >= 40:
+                          break
+                  print("soop-bida game", gno, "kept", kept, "/", len(matches))
+              return out
+
+          try:
+              bida_items = fetch_soop_billiards()
+              # không qua add_items (cần url không phải m3u8)
+              for ch in bida_items:
+                  all_ch.append(ch)
+              print("OK soop-bida", len(bida_items))
+          except Exception as e:
+              print("ERR soop-bida", e)
+
+
           # SH-16/SH-17/SH-26: validate stream URL (HLS HTTPS only)
           import ipaddress
 
@@ -513,6 +784,11 @@ jobs:
               if validate_stream_url(u):
                   item["type"] = "stream"
                   streams.append(item)
+              elif (item.get("source") == "soop_bida") or (
+                  u.startswith("https://") and "billiards.sooplive.com" in u
+              ):
+                  item["type"] = "event_link"
+                  event_links.append(item)
               elif u.startswith("https://") and "/upcoming/" in u:
                   item["type"] = "event_link"
                   event_links.append(item)
@@ -585,6 +861,158 @@ jobs:
           print("saved", len(streams), "streams,", len(event_links), "event_links")
           PY
 
+
+      - name: Enrich scores (API-Football → scores.json)
+        if: always()
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: |
+          python3 << 'PY'
+          import json, os, ssl, time, urllib.request, urllib.parse
+          from datetime import datetime, timedelta, timezone
+
+          KEY = (os.environ.get("API_FOOTBALL_KEY") or "").strip()
+          CTX = ssl.create_default_context()
+          OUT = "scores.json"
+
+          def load_prev():
+              try:
+                  with open(OUT, encoding="utf-8") as f:
+                      d = json.load(f)
+                  return d if isinstance(d, dict) else {"items": []}
+              except Exception:
+                  return {"items": [], "updated_at": None}
+
+          prev = load_prev()
+          if not KEY:
+              print("SKIP API-Football: secret API_FOOTBALL_KEY chưa cấu hình")
+              # giữ file cũ nếu có
+              if not os.path.exists(OUT):
+                  with open(OUT, "w", encoding="utf-8") as f:
+                      json.dump({"updated_at": None, "items": [], "note": "no_api_key"}, f)
+              raise SystemExit(0)
+
+          def api_get(path, params=None):
+              q = ("?" + urllib.parse.urlencode(params)) if params else ""
+              url = "https://v3.football.api-sports.io" + path + q
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "x-apisports-key": KEY,
+                      "Accept": "application/json",
+                      "User-Agent": "SportsH-Workflow/1.0",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=45, context=CTX) as r:
+                  return json.load(r)
+
+          def norm(s):
+              import unicodedata, re
+              s = unicodedata.normalize("NFD", str(s or "").lower())
+              s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+              return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+          # Lấy fixtures hôm nay + hôm qua (FT + live) — tiết kiệm quota
+          items = []
+          seen = set()
+          today = datetime.now(timezone.utc).date()
+          for delta in (0, -1):
+              day = (today + timedelta(days=delta)).isoformat()
+              for status in (None, "FT", "AET", "PEN"):
+                  params = {"date": day}
+                  if status:
+                      params["status"] = status
+                  try:
+                      data = api_get("/fixtures", params)
+                  except Exception as e:
+                      print("API err", day, status, e)
+                      continue
+                  resp = data.get("response") or []
+                  print("fixtures", day, status or "all", len(resp))
+                  for row in resp:
+                      fx = row.get("fixture") or {}
+                      teams = row.get("teams") or {}
+                      goals = row.get("goals") or {}
+                      st = ((fx.get("status") or {}).get("short") or "").upper()
+                      home = ((teams.get("home") or {}).get("name")) or ""
+                      away = ((teams.get("away") or {}).get("name")) or ""
+                      if not home or not away:
+                          continue
+                      key = norm(home) + "|" + norm(away) + "|" + day
+                      if key in seen:
+                          continue
+                      seen.add(key)
+                      hs, aws = goals.get("home"), goals.get("away")
+                      status_out = "finished" if st in ("FT", "AET", "PEN") else (
+                          "live" if st in ("1H", "2H", "HT", "ET", "BT", "P", "LIVE") else "scheduled"
+                      )
+                      items.append({
+                          "home": home,
+                          "away": away,
+                          "home_score": hs,
+                          "away_score": aws,
+                          "status": status_out,
+                          "date": day,
+                          "league": ((row.get("league") or {}).get("name")) or "",
+                          "api_status": st,
+                      })
+                  time.sleep(0.35)  # nhẹ nhàng với rate limit
+
+          # Live snapshot riêng (nếu còn quota)
+          try:
+              data = api_get("/fixtures", {"live": "all"})
+              for row in data.get("response") or []:
+                  fx = row.get("fixture") or {}
+                  teams = row.get("teams") or {}
+                  goals = row.get("goals") or {}
+                  home = ((teams.get("home") or {}).get("name")) or ""
+                  away = ((teams.get("away") or {}).get("name")) or ""
+                  if not home or not away:
+                      continue
+                  day = (fx.get("date") or "")[:10]
+                  key = norm(home) + "|" + norm(away) + "|" + day
+                  if key in seen:
+                      # cập nhật score live
+                      for it in items:
+                          if norm(it["home"]) == norm(home) and norm(it["away"]) == norm(away):
+                              it["home_score"] = goals.get("home")
+                              it["away_score"] = goals.get("away")
+                              it["status"] = "live"
+                              it["api_status"] = ((fx.get("status") or {}).get("short")) or it.get("api_status")
+                              break
+                      continue
+                  seen.add(key)
+                  items.append({
+                      "home": home,
+                      "away": away,
+                      "home_score": goals.get("home"),
+                      "away_score": goals.get("away"),
+                      "status": "live",
+                      "date": day,
+                      "league": ((row.get("league") or {}).get("name")) or "",
+                      "api_status": ((fx.get("status") or {}).get("short")) or "",
+                  })
+              print("live fixtures merged", len(data.get("response") or []))
+          except Exception as e:
+              print("live fetch skip", e)
+
+          # Quality: không ghi rỗng nếu trước đó có data
+          if not items and prev.get("items"):
+              print("WARN: API-Football empty — keep previous scores.json")
+              raise SystemExit(0)
+
+          out = {
+              "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "count": len(items),
+              "source": "api-football",
+              "items": items,
+          }
+          with open(OUT, "w", encoding="utf-8") as f:
+              json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+          print("saved scores.json", len(items))
+          PY
+
+
       # Commit độc lập theo file đã đổi (matches / channels có thể cập nhật riêng)
       - name: Commit data files
         if: always()
@@ -603,6 +1031,12 @@ jobs:
           else
             git add channels.json
             CHANGED="$CHANGED channels"
+          fi
+          if git diff --quiet scores.json 2>/dev/null; then
+            true
+          else
+            git add scores.json
+            CHANGED="$CHANGED scores"
           fi
           if [ -z "$CHANGED" ]; then
             echo "No data file changes to commit"
