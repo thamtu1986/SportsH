@@ -1190,7 +1190,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.3.2";
+    const APP_VERSION = "2.3.3";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1676,6 +1676,62 @@
       return s.length ? s[0].url : null;
     }
 
+    function teamTokens(name) {
+      return normScoreKey(name).split(/\s+/).filter((w) => w.length > 2);
+    }
+    function teamNamesCompatible(a, b) {
+      const na = normScoreKey(a), nb = normScoreKey(b);
+      if (!na || !nb) return false;
+      if (na === nb) return true;
+      if (na.includes(nb) || nb.includes(na)) return true;
+      const ta = teamTokens(a), tb = teamTokens(b);
+      if (!ta.length || !tb.length) return false;
+      const shorter = ta.length <= tb.length ? ta : tb;
+      const longer = ta.length <= tb.length ? tb : ta;
+      if (shorter.every((w) => longer.includes(w))) return true;
+      return ta.some((w) => w.length >= 4 && tb.includes(w));
+    }
+    function attachStreamsFromExternal(baseList, extList) {
+      const donors = (extList || []).filter((m) => hasWatchableStream(m));
+      if (!donors.length) return baseList;
+      return baseList.map((m) => {
+        if (hasWatchableStream(m)) return m;
+        const h = (m.home_team && m.home_team.name) || m.home_team_name || "";
+        const a = (m.away_team && m.away_team.name) || m.away_team_name || "";
+        if (!h || !a) return m;
+        const mTs = m.start_time ? Date.parse(m.start_time) : NaN;
+        const cands = [];
+        for (const d of donors) {
+          const dh = (d.home_team && d.home_team.name) || d.home_team_name || "";
+          const da = (d.away_team && d.away_team.name) || d.away_team_name || "";
+          const direct = teamNamesCompatible(h, dh) && teamNamesCompatible(a, da);
+          const swapped = teamNamesCompatible(h, da) && teamNamesCompatible(a, dh);
+          if (!direct && !swapped) continue;
+          const dTs = d.start_time ? Date.parse(d.start_time) : NaN;
+          if (Number.isFinite(mTs) && Number.isFinite(dTs) && Math.abs(mTs - dTs) > 36 * 3600e3) continue;
+          cands.push(d);
+        }
+        // Ưu tiên cola nếu nhiều ứng viên cùng trận
+        let pick = null;
+        if (cands.length === 1) pick = cands[0];
+        else if (cands.length > 1) {
+          const cola = cands.filter((d) => (d._source || "") === "cola");
+          pick = cola.length === 1 ? cola[0] : (cola[0] || cands[0]);
+        }
+        if (!pick) return m;
+        const out = Object.assign({}, m);
+        out.primary_stream_url = pick.primary_stream_url;
+        out.commentators = (pick.commentators && pick.commentators.length) ? pick.commentators.slice() : out.commentators;
+        out._streamFrom = pick._source || "external";
+        const ph = (pick.home_team && pick.home_team.name) || pick.home_team_name || "";
+        const pa = (pick.away_team && pick.away_team.name) || pick.away_team_name || "";
+        const pair = typeof teamPairKey === "function" ? teamPairKey(ph, pa) : (normScoreKey(ph) + "||" + normScoreKey(pa));
+        const day = (pick.start_time || m.start_time || "").toString().slice(0, 10);
+        out._linkedStreamKey = pair + "|" + day;
+        return out;
+      });
+    }
+
     function hasWatchableStream(m) {
       return getStreams(m).length > 0;
     }
@@ -1803,14 +1859,15 @@
     }
 
     function channelToMatch(ch, idx) {
-      // Tên dạng: "15:30 - 02/11 | Team A VS Team B (League) | BLV"
+      // Hỗ trợ: "15:30 - 02/11 | A VS B (League) | BLV"
+      // và M3U: "🟢 12:00 09/11 ⚽ Erchim vs Khovd Western (BLV 247) [hls]"
       const name = ch.name || "Kênh";
       let home = "";
       let away = "";
       let league = ch.group || "";
       let blv = "";
       let timeLabel = "";
-      const parts = name.split("|").map((s) => s.trim());
+      const parts = name.split("|").map((s) => s.trim()).filter(Boolean);
       if (parts.length >= 2) {
         timeLabel = parts[0];
         const mid = parts[1];
@@ -1826,11 +1883,37 @@
         }
         if (parts[2]) blv = parts[2];
       } else {
-        // fallback: cả chuỗi là tên
-        home = name;
+        // M3U một đoạn: tách giờ + vs
+        const raw = name.replace(/[🟢🟡🔴⚽]/g, " ").replace(/\[.*?\]/g, " ");
+        const tmAll = raw.match(/(\d{1,2}:\d{2})\s*[-–]?\s*(\d{1,2}\/\d{1,2})?/);
+        if (tmAll) {
+          timeLabel = (tmAll[1] + (tmAll[2] ? " - " + tmAll[2] : "")).trim();
+        }
+        const vs = raw.split(/\s+VS\s+|\s+vs\s+/i);
+        if (vs.length >= 2) {
+          let left = vs[0].replace(/\d{1,2}:\d{2}/g, " ").replace(/\d{1,2}\/\d{1,2}/g, " ");
+          left = left.replace(/^[\s\-–|]+/, "").trim();
+          home = left.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+          let right = vs[1].replace(/\[.*?\]/g, " ");
+          const blvM = right.match(/\(([^)]+)\)\s*$/) || right.match(/\(([^)]+)\)/);
+          if (blvM && /blv|blv\s|\d{2,}/i.test(blvM[1])) {
+            blv = blvM[1].trim();
+            right = right.replace(blvM[0], " ");
+          } else {
+            const lg = right.match(/\(([^)]+)\)/);
+            if (lg) league = lg[1];
+            right = right.replace(/\([^)]*\)/g, " ");
+          }
+          away = right.replace(/\s+/g, " ").trim();
+        } else {
+          home = name;
+        }
       }
-      // Bỏ bản ghi parse hỏng (tên đội trống / ?)
       if (!home || home === "?" || home === "Kênh") return null;
+      if (!away || away === "—" || away.length < 2) {
+        // không parse được 2 đội → bỏ (tránh card rác)
+        return null;
+      }
 
       const src = (ch.source || "other").toLowerCase();
       const srcLabel = SRC_LABELS[src] || src;
@@ -1926,14 +2009,26 @@
 
       const applyList = (results, extra, source, meta) => {
         // Merge tỷ số API-Football trước khi phân loại LIVE/DONE
-        const base = results.map(applyScoreOverlay);
-        const ext = (extra || []).map(applyScoreOverlay);
+        let base = results.map(applyScoreOverlay);
+        let ext = (extra || []).map(applyScoreOverlay);
+        base = attachStreamsFromExternal(base, ext);
         const isBida = (m) => (m._source === "soop_bida");
         const notDone = base.filter(m => classify(m) !== "done");
         const liveSoon = notDone.filter(m => {
           const c = classify(m);
           return c === "live" || c === "soon" || hasWatchableStream(m) || isBida(m);
         });
+        const linked = new Set(base.filter(m => m._linkedStreamKey).map(m => m._linkedStreamKey));
+        if (linked.size) {
+          ext = ext.filter(m => {
+            const h = (m.home_team && m.home_team.name) || m.home_team_name || "";
+            const a = (m.away_team && m.away_team.name) || m.away_team_name || "";
+            const pair = teamPairKey(h, a);
+            const day = (m.start_time || "").toString().slice(0, 10);
+            const k = pair ? pair + "|" + day : "";
+            return !k || !linked.has(k);
+          });
+        }
         const done = base.filter(m => classify(m) === "done" && (hasWatchableStream(m) || isBida(m))).slice(0, 40);
         allMatches = liveSoon.concat(ext).concat(done);
 
