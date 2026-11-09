@@ -14,9 +14,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Fetch matches from xoiche
+        continue-on-error: true
         run: |
           python3 << 'PY'
-          import json, urllib.request, time, ssl
+          import json, urllib.request, time, ssl, sys
           from urllib.parse import urlparse
 
           CTX = ssl.create_default_context()
@@ -49,61 +50,61 @@ jobs:
               with opener.open(req, timeout=30) as r:
                   return json.load(r)
 
-          base = "https://xoiche.live"
-          url = base + "/api/matches/?ordering=smart&page_size=100&site=xoiche"
-          results = []
-          for _ in range(8):
-              data = get(url)
-              results.extend(data.get("results") or [])
-              nxt = data.get("next")
-              if not nxt:
-                  break
-              cand = nxt if str(nxt).startswith("http") else base + str(nxt)
-              if not host_ok(cand):
-                  print("skip next host", cand[:80])
-                  break
-              url = cand
-              time.sleep(0.2)
+          try:
+              base = "https://xoiche.live"
+              url = base + "/api/matches/?ordering=smart&page_size=100&site=xoiche"
+              results = []
+              for _ in range(8):
+                  data = get(url)
+                  results.extend(data.get("results") or [])
+                  nxt = data.get("next")
+                  if not nxt:
+                      break
+                  cand = nxt if str(nxt).startswith("http") else base + str(nxt)
+                  if not host_ok(cand):
+                      print("skip next host", cand[:80])
+                      break
+                  url = cand
+                  time.sleep(0.2)
 
-          def has_stream(m):
-              def ok(u):
-                  return u and ".m3u8" in str(u)
-              if ok(m.get("primary_stream_url")) or ok(m.get("backup_stream_url")):
+              def has_stream(m):
+                  def ok(u):
+                      return u and ".m3u8" in str(u)
+                  if ok(m.get("primary_stream_url")) or ok(m.get("backup_stream_url")):
+                      return True
+                  for c in m.get("commentators") or []:
+                      if ok(c.get("stream_url")) or ok(c.get("flv_stream_url")):
+                          return True
+                  for c in m.get("commentator_streams") or []:
+                      if ok(c.get("stream_url")):
+                          return True
+                      if ok((c.get("commentator") or {}).get("stream_url")):
+                          return True
+                  return False
+
+              def is_relevant(m):
+                  st = str(m.get("status") or "").lower()
+                  if st in ("live", "inplay", "1h", "2h", "ht", "half_time", "halftime"):
+                      return True
+                  if st in ("finished", "ft", "after_pen", "after_et", "postponed", "cancelled"):
+                      return has_stream(m)
                   return True
-              for c in m.get("commentators") or []:
-                  if ok(c.get("stream_url")) or ok(c.get("flv_stream_url")):
-                      return True
-              for c in m.get("commentator_streams") or []:
-                  if ok(c.get("stream_url")):
-                      return True
-                  if ok((c.get("commentator") or {}).get("stream_url")):
-                      return True
-              return False
 
-          def is_relevant(m):
-              st = str(m.get("status") or "").lower()
-              if st in ("live", "inplay", "1h", "2h", "ht", "half_time", "halftime"):
-                  return True
-              if st in ("finished", "ft", "after_pen", "after_et", "postponed", "cancelled"):
-                  return has_stream(m)
-              return True
-
-          watch = [m for m in results if is_relevant(m)]
-          # SH-15: không ghi đè matches.json bằng danh sách rỗng (API lỗi)
-          if not watch and results:
-              # Có data nhưng filter hết — vẫn ghi (có thể hết trận)
-              pass
-          if not results:
-              print("WARN: xoiche returned 0 results — keep previous matches.json")
-              raise SystemExit(0)
-          out = {
-              "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "count": len(watch),
-              "results": watch,
-          }
-          with open("matches.json", "w", encoding="utf-8") as f:
-              json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
-          print("saved", len(watch), "matches")
+              watch = [m for m in results if is_relevant(m)]
+              if not results:
+                  print("WARN: xoiche returned 0 results — keep previous matches.json")
+                  sys.exit(0)
+              out = {
+                  "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "count": len(watch),
+                  "results": watch,
+              }
+              with open("matches.json", "w", encoding="utf-8") as f:
+                  json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+              print("saved", len(watch), "matches")
+          except Exception as e:
+              print("WARN: xoiche fetch failed — keep previous matches.json:", type(e).__name__, e)
+              sys.exit(0)
           PY
 
       - name: Fetch channels (M3U + Hội Quán + Thiên Đình)
@@ -996,6 +997,7 @@ jobs:
 
       - name: Enrich scores (API-Football → scores.json)
         if: always()
+        continue-on-error: true
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
         run: |
@@ -1216,7 +1218,7 @@ jobs:
 
           print("API-Football request_count", request_count)
 
-                    # Quality: không ghi rỗng nếu trước đó có data
+          # Quality: không ghi rỗng nếu trước đó có data
           if not items and prev.get("items"):
               print("WARN: API-Football empty — keep previous scores.json")
               raise SystemExit(0)
@@ -1240,24 +1242,19 @@ jobs:
       - name: Commit data files
         if: always()
         run: |
+          set +e
           git config user.name "SportsH Bot"
           git config user.email "bot@sportsh.local"
           CHANGED=""
-          if git diff --quiet matches.json 2>/dev/null; then
-            true
-          else
+          if ! git diff --quiet matches.json 2>/dev/null; then
             git add matches.json
             CHANGED="$CHANGED matches"
           fi
-          if git diff --quiet channels.json 2>/dev/null; then
-            true
-          else
+          if ! git diff --quiet channels.json 2>/dev/null; then
             git add channels.json
             CHANGED="$CHANGED channels"
           fi
-          if git diff --quiet scores.json 2>/dev/null; then
-            true
-          else
+          if ! git diff --quiet scores.json 2>/dev/null; then
             git add scores.json
             CHANGED="$CHANGED scores"
           fi
@@ -1265,6 +1262,12 @@ jobs:
             echo "No data file changes to commit"
             exit 0
           fi
-          git commit -m "chore: update$CHANGED"
-          git push
-          echo "Committed:$CHANGED"
+          git commit -m "chore: update$CHANGED" || { echo "commit skipped"; exit 0; }
+          git pull --rebase origin main 2>/dev/null || true
+          if git push; then
+            echo "Committed:$CHANGED"
+            exit 0
+          else
+            echo "WARN: git push failed — data written in workspace but not on remote"
+            exit 0
+          fi
