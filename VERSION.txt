@@ -1,4 +1,2 @@
-SportsH v2.3.6
-- Dedupe chỉ trong cùng nguồn → Cola không bị mất vì trùng Chuối Chiên
-- Nguồn CDN (Chuối Chiên…): nút/mở trang gốc khi không phát nhúng được
-- Tab nguồn độc lập giữ nguyên
+SportsH v2.3.7
+- Card Cola/Gà Vàng/Chuối… hiện tỷ số lấy từ Xoiche cùng cặp đội (chỉ số, không gắn stream)

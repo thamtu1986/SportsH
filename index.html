@@ -1190,7 +1190,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.3.6";
+    const APP_VERSION = "2.3.7";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1695,6 +1695,62 @@
         .trim();
     }
 
+
+    /** Điền tỷ số cho card nguồn phụ từ trận Xoiche cùng đội — không đụng stream */
+    function fillScoresFromBase(extList, baseList) {
+      const bases = (baseList || []).filter((m) => {
+        const hs = m.home_score ?? m.homeScore;
+        const as = m.away_score ?? m.awayScore;
+        return hs != null && as != null && hs !== "" && as !== "";
+      });
+      if (!bases.length) return extList;
+      function compat(a, b) {
+        const na = normScoreKey(a), nb = normScoreKey(b);
+        if (!na || !nb) return false;
+        if (na === nb || na.includes(nb) || nb.includes(na)) return true;
+        const ta = na.split(/\s+/).filter((w) => w.length > 2);
+        const tb = nb.split(/\s+/).filter((w) => w.length > 2);
+        if (!ta.length || !tb.length) return false;
+        const short = ta.length <= tb.length ? ta : tb;
+        const long = ta.length <= tb.length ? tb : ta;
+        return short.every((w) => long.includes(w));
+      }
+      return (extList || []).map((m) => {
+        const curH = m.home_score ?? m.homeScore;
+        const curA = m.away_score ?? m.awayScore;
+        if (curH != null && curA != null && curH !== "" && curA !== "") return m;
+        const h = (m.home_team && m.home_team.name) || m.home_team_name || "";
+        const a = (m.away_team && m.away_team.name) || m.away_team_name || "";
+        if (!h || !a) return m;
+        const mTs = m.start_time ? Date.parse(m.start_time) : NaN;
+        const cands = [];
+        for (const b of bases) {
+          const bh = (b.home_team && b.home_team.name) || b.home_team_name || "";
+          const ba = (b.away_team && b.away_team.name) || b.away_team_name || "";
+          const d = compat(h, bh) && compat(a, ba);
+          const s = compat(h, ba) && compat(a, bh);
+          if (!d && !s) continue;
+          const bTs = b.start_time ? Date.parse(b.start_time) : NaN;
+          if (Number.isFinite(mTs) && Number.isFinite(bTs) && Math.abs(mTs - bTs) > 36 * 3600e3) continue;
+          cands.push({ b, swapped: !!s });
+        }
+        if (cands.length !== 1) return m;
+        const { b, swapped } = cands[0];
+        const out = Object.assign({}, m);
+        const hs = b.home_score ?? b.homeScore;
+        const as = b.away_score ?? b.awayScore;
+        if (swapped) {
+          out.home_score = as;
+          out.away_score = hs;
+        } else {
+          out.home_score = hs;
+          out.away_score = as;
+        }
+        out._scoreSource = "xoiche-score";
+        return out;
+      });
+    }
+
     function dedupeExternalMatches(list) {
       // Chỉ gộp trong CÙNG nguồn — không xóa Cola vì trùng giờ với Chuối Chiên
       const map = new Map();
@@ -1960,8 +2016,9 @@
       const applyList = (results, extra, source, meta) => {
         // Merge tỷ số API-Football trước khi phân loại LIVE/DONE
         const base = results.map(applyScoreOverlay);
-        const ext = (extra || []).map(applyScoreOverlay);
-        // Không gắn stream chéo nguồn — mỗi tab nguồn độc lập
+        let ext = (extra || []).map(applyScoreOverlay);
+        // Chỉ điền TỶ SỐ từ Xoiche (cùng cặp đội) — không gắn stream chéo tab
+        ext = fillScoresFromBase(ext, base);
         const isBida = (m) => (m._source === "soop_bida");
         const notDone = base.filter(m => classify(m) !== "done");
         const liveSoon = notDone.filter(m => {
