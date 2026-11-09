@@ -1190,7 +1190,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.3.4";
+    const APP_VERSION = "2.3.5";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1676,62 +1676,6 @@
       return s.length ? s[0].url : null;
     }
 
-    function teamTokens(name) {
-      return normScoreKey(name).split(/\s+/).filter((w) => w.length > 2);
-    }
-    function teamNamesCompatible(a, b) {
-      const na = normScoreKey(a), nb = normScoreKey(b);
-      if (!na || !nb) return false;
-      if (na === nb) return true;
-      if (na.includes(nb) || nb.includes(na)) return true;
-      const ta = teamTokens(a), tb = teamTokens(b);
-      if (!ta.length || !tb.length) return false;
-      const shorter = ta.length <= tb.length ? ta : tb;
-      const longer = ta.length <= tb.length ? tb : ta;
-      if (shorter.every((w) => longer.includes(w))) return true;
-      return ta.some((w) => w.length >= 4 && tb.includes(w));
-    }
-    function attachStreamsFromExternal(baseList, extList) {
-      const donors = (extList || []).filter((m) => hasWatchableStream(m));
-      if (!donors.length) return baseList;
-      return baseList.map((m) => {
-        if (hasWatchableStream(m)) return m;
-        const h = (m.home_team && m.home_team.name) || m.home_team_name || "";
-        const a = (m.away_team && m.away_team.name) || m.away_team_name || "";
-        if (!h || !a) return m;
-        const mTs = m.start_time ? Date.parse(m.start_time) : NaN;
-        const cands = [];
-        for (const d of donors) {
-          const dh = (d.home_team && d.home_team.name) || d.home_team_name || "";
-          const da = (d.away_team && d.away_team.name) || d.away_team_name || "";
-          const direct = teamNamesCompatible(h, dh) && teamNamesCompatible(a, da);
-          const swapped = teamNamesCompatible(h, da) && teamNamesCompatible(a, dh);
-          if (!direct && !swapped) continue;
-          const dTs = d.start_time ? Date.parse(d.start_time) : NaN;
-          if (Number.isFinite(mTs) && Number.isFinite(dTs) && Math.abs(mTs - dTs) > 36 * 3600e3) continue;
-          cands.push(d);
-        }
-        // Ưu tiên cola nếu nhiều ứng viên cùng trận
-        let pick = null;
-        if (cands.length === 1) pick = cands[0];
-        else if (cands.length > 1) {
-          const cola = cands.filter((d) => (d._source || "") === "cola");
-          pick = cola.length === 1 ? cola[0] : (cola[0] || cands[0]);
-        }
-        if (!pick) return m;
-        const out = Object.assign({}, m);
-        out.primary_stream_url = pick.primary_stream_url;
-        out.commentators = (pick.commentators && pick.commentators.length) ? pick.commentators.slice() : out.commentators;
-        out._streamFrom = pick._source || "external";
-        const ph = (pick.home_team && pick.home_team.name) || pick.home_team_name || "";
-        const pa = (pick.away_team && pick.away_team.name) || pick.away_team_name || "";
-        const pair = typeof teamPairKey === "function" ? teamPairKey(ph, pa) : (normScoreKey(ph) + "||" + normScoreKey(pa));
-        const day = (pick.start_time || m.start_time || "").toString().slice(0, 10);
-        out._linkedStreamKey = pair + "|" + day;
-        return out;
-      });
-    }
-
     function hasWatchableStream(m) {
       return getStreams(m).length > 0;
     }
@@ -2009,26 +1953,15 @@
 
       const applyList = (results, extra, source, meta) => {
         // Merge tỷ số API-Football trước khi phân loại LIVE/DONE
-        let base = results.map(applyScoreOverlay);
-        let ext = (extra || []).map(applyScoreOverlay);
-        base = attachStreamsFromExternal(base, ext);
+        const base = results.map(applyScoreOverlay);
+        const ext = (extra || []).map(applyScoreOverlay);
+        // Không gắn stream chéo nguồn — mỗi tab nguồn độc lập
         const isBida = (m) => (m._source === "soop_bida");
         const notDone = base.filter(m => classify(m) !== "done");
         const liveSoon = notDone.filter(m => {
           const c = classify(m);
           return c === "live" || c === "soon" || hasWatchableStream(m) || isBida(m);
         });
-        const linked = new Set(base.filter(m => m._linkedStreamKey).map(m => m._linkedStreamKey));
-        if (linked.size) {
-          ext = ext.filter(m => {
-            const h = (m.home_team && m.home_team.name) || m.home_team_name || "";
-            const a = (m.away_team && m.away_team.name) || m.away_team_name || "";
-            const pair = teamPairKey(h, a);
-            const day = (m.start_time || "").toString().slice(0, 10);
-            const k = pair ? pair + "|" + day : "";
-            return !k || !linked.has(k);
-          });
-        }
         const done = base.filter(m => classify(m) === "done" && (hasWatchableStream(m) || isBida(m))).slice(0, 40);
         allMatches = liveSoon.concat(ext).concat(done);
 
@@ -2836,19 +2769,7 @@
         return;
       }
 
-      // Ưu tiên tên chứa Cola / nguồn ổn định web
-      streams = streams.slice().sort((a, b) => {
-        const score = (s) => {
-          const n = (s.name || "").toLowerCase();
-          if (n.includes("cola")) return 0;
-          if (n.includes("gà") || n.includes("gavang")) return 1;
-          if (n.includes("chuối") || n.includes("chuoichien")) return 9;
-          return 5;
-        };
-        return score(a) - score(b);
-      });
-
-      // Hàng đợi fallback khi CDN chặn
+      // Cùng một nguồn: 1 link phát ngay; nhiều BLV → chọn (fallback URL trong cùng trận)
       const ctx = Object.assign({}, m);
       const playWithQueue = (startIdx) => {
         const rest = streams.slice(startIdx + 1).map((s) => ({ url: s.url, name: s.name }));
@@ -2862,16 +2783,14 @@
         return;
       }
 
-      // Tự phát nguồn ưu tiên (Cola…); vẫn hiện chọn BLV
-      playWithQueue(0);
-      document.getElementById("playerTitle").textContent = matchTitle + " · " + streams[0].name;
+      document.getElementById("playerTitle").textContent = matchTitle + " · Chọn BLV";
       const list = document.getElementById("blvPickerList");
       list.innerHTML = "";
       streams.forEach((s, i) => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "blv-pick-btn";
-        btn.textContent = (i === 0 ? "▶  " : "   ") + s.name;
+        btn.textContent = "▶  " + s.name;
         btn.addEventListener("click", () => playWithQueue(i));
         list.appendChild(btn);
       });

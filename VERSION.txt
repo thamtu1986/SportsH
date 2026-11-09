@@ -1,4 +1,4 @@
-SportsH v2.3.4 — Đúng tư duy đa nguồn
-- Gắn stream: ưu tiên Cola > Gà Vàng > … > Chuối Chiên (CDN hay chặn)
-- Gom nhiều nguồn vào BLV picker; auto phát Cola trước
-- CDN lỗi → tự thử URL kế; nút ngoài mở Cola (không ép Xoiche khi Xoiche không có link)
+SportsH v2.3.5
+- Bỏ gắn stream chéo nguồn (Xoiche ≠ Cola)
+- Tab nguồn độc lập: mỗi trận chỉ thuộc một nguồn
+- Xoiche NO LINK vẫn NO LINK; xem Cola ở tab Cola
