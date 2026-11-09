@@ -984,16 +984,46 @@ jobs:
 
           # Fixtures theo ngày: chỉ gọi nếu chưa có hoặc > 6 giờ (không 288 req/ngày)
           fetch_fixtures = age_minutes(fixtures_fetched_at) >= 360 or not (prev.get("items") or [])
+          day_ok = {}  # day -> bool success
           if fetch_fixtures:
               for delta in (0, -1):
                   day = (today + timedelta(days=delta)).isoformat()
+                  day_ok[day] = False
                   try:
                       data = api_get("/fixtures", {"date": day})
                       request_count += 1
                   except Exception as e:
                       print("API err", day, e)
+                      # SH-38: giữ items cũ của đúng ngày
+                      for it in prev.get("items") or []:
+                          if str(it.get("date") or "") == day and it.get("status") != "live":
+                              key = norm(it.get("home")) + "|" + norm(it.get("away")) + "|" + day
+                              if key not in seen:
+                                  seen.add(key)
+                                  items.append(it)
+                      continue
+                  # SH-37: response hợp lệ (có key response, không errors nghiêm trọng)
+                  if not isinstance(data, dict) or "response" not in data:
+                      print("API invalid payload", day)
+                      for it in prev.get("items") or []:
+                          if str(it.get("date") or "") == day and it.get("status") != "live":
+                              key = norm(it.get("home")) + "|" + norm(it.get("away")) + "|" + day
+                              if key not in seen:
+                                  seen.add(key)
+                                  items.append(it)
+                      continue
+                  errs = data.get("errors")
+                  if errs and (isinstance(errs, dict) and len(errs) or isinstance(errs, list) and len(errs)):
+                      print("API errors payload", day, errs)
+                      for it in prev.get("items") or []:
+                          if str(it.get("date") or "") == day and it.get("status") != "live":
+                              key = norm(it.get("home")) + "|" + norm(it.get("away")) + "|" + day
+                              if key not in seen:
+                                  seen.add(key)
+                                  items.append(it)
                       continue
                   resp = data.get("response") or []
+                  day_ok[day] = True
                   print("fixtures", day, len(resp))
                   for row in resp:
                       fx = row.get("fixture") or {}
@@ -1024,10 +1054,14 @@ jobs:
                           "fixture_id": fx.get("id"),
                       })
                   time.sleep(0.35)
-              fixtures_fetched_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+              # SH-37: chỉ cập nhật timestamp nếu ít nhất 1 ngày thành công
+              if any(day_ok.values()):
+                  fixtures_fetched_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                  print("fixtures_fetched_at updated", day_ok)
+              else:
+                  print("fixtures_fetched_at NOT updated — all days failed")
           else:
               print("SKIP fixtures by date — age_min", round(age_minutes(fixtures_fetched_at), 1))
-              # giữ items không-live từ snapshot trước
               for it in prev.get("items") or []:
                   if it.get("status") != "live":
                       key = norm(it.get("home")) + "|" + norm(it.get("away")) + "|" + str(it.get("date") or "")
