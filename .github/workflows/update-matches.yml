@@ -558,6 +558,86 @@ jobs:
           except Exception as e:
               print("ERR cola-api-cltvlv", e)
 
+          # 1d) Gắn tỷ số Cola API vào MỌI channel cùng cặp đội (kể cả URL khác / THTT)
+          try:
+              data = get_json("https://api.cltvlv.com/api/matches")
+              blob = data.get("data") if isinstance(data, dict) else data
+              rows = list(blob.values()) if isinstance(blob, dict) else (blob if isinstance(blob, list) else [])
+
+              def _sc(arr):
+                  if isinstance(arr, list) and arr:
+                      try:
+                          return int(arr[0])
+                      except Exception:
+                          return None
+                  return None
+
+              def _norm(s):
+                  import unicodedata, re as _re
+                  s = unicodedata.normalize("NFD", str(s or "").lower())
+                  s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+                  return _re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+              score_map = {}
+              for row in rows:
+                  if not isinstance(row, dict):
+                      continue
+                  home = row.get("homeTeamName") or ""
+                  away = row.get("awayTeamName") or ""
+                  hs, aws = _sc(row.get("homeScore")), _sc(row.get("awayScore"))
+                  if hs is None or aws is None:
+                      continue
+                  hn, an = _norm(home), _norm(away)
+                  if not hn or not an:
+                      continue
+                  pair = hn + "||" + an if hn < an else an + "||" + hn
+                  ms = row.get("matchStatus")
+                  mstatus = "live" if ms == 2 else ("finished" if ms == 3 else "scheduled")
+                  start_iso = None
+                  mt = row.get("matchTime")
+                  if isinstance(mt, (int, float)) and mt > 1e9:
+                      start_iso = datetime.fromtimestamp(int(mt), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                  score_map[pair] = {
+                      "hs": hs, "as": aws, "status": mstatus,
+                      "start": start_iso, "homeN": hn, "awayN": an,
+                  }
+              patched = 0
+              for ch in all_ch:
+                  if ch.get("home_score") is not None and ch.get("away_score") is not None:
+                      continue
+                  name = ch.get("name") or ""
+                  parts = [p.strip() for p in name.split("|")]
+                  mid = parts[1] if len(parts) >= 2 else parts[0]
+                  mid = re.sub(r"^[\W0-9\s:/-]+", "", mid)
+                  mid = re.sub(r"[⚽🟢🟡🔴]", "", mid).strip()
+                  vs = re.split(r"\s+VS\s+|\s+vs\s+", mid, maxsplit=1)
+                  if len(vs) < 2:
+                      vs = re.split(r"\s+v\s+", mid, maxsplit=1)
+                  if len(vs) < 2:
+                      continue
+                  home = re.sub(r"\([^)]*\)\s*$", "", vs[0]).strip()
+                  away = re.sub(r"\([^)]*\).*$", "", vs[1]).strip()
+                  away = re.sub(r"\[.*$", "", away).strip()
+                  hn, an = _norm(home), _norm(away)
+                  if not hn or not an:
+                      continue
+                  pair = hn + "||" + an if hn < an else an + "||" + hn
+                  hit = score_map.get(pair)
+                  if not hit:
+                      continue
+                  if hn == hit["homeN"]:
+                      ch["home_score"], ch["away_score"] = hit["hs"], hit["as"]
+                  else:
+                      ch["home_score"], ch["away_score"] = hit["as"], hit["hs"]
+                  if not ch.get("match_status"):
+                      ch["match_status"] = hit["status"]
+                  if not ch.get("start_time") and hit.get("start"):
+                      ch["start_time"] = hit["start"]
+                  patched += 1
+              print("OK cola-score-patch", patched, "map", len(score_map))
+          except Exception as e:
+              print("ERR cola-score-patch", e)
+
           # 2) API Hội Quán / Thiên Đình / Vòng Cấm
           json_sources = [
               ("hoiquan", "https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished", "Hội Quán"),
