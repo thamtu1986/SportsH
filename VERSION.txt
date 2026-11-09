@@ -1,3 +1,4 @@
-SportsH v2.3.1 — Cola score patch
-Workflow gắn home_score/away_score từ api.cltvlv.com vào mọi channel cùng cặp đội.
-Production: cola có 36 kênh nhưng 0 điểm — đã xử lý.
+SportsH v2.3.2 — Source link-up
+- Gắn stream Cola/THTT vào trận Xoiche NO LINK khi tên đội tương thích (Erchim ⊂ Khaan Khuns-Erchim)
+- Chỉ gắn khi đúng 1 ứng viên; ẩn card external trùng
+- Workflow cola-score-patch: khớp tên linh hoạt hơn
