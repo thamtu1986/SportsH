@@ -1190,7 +1190,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.3.5";
+    const APP_VERSION = "2.3.6";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1215,11 +1215,13 @@
     }
     let refreshTimer = null;
 
-    /** Chỉ trả site xem được trên trình duyệt; nguồn chỉ có M3U (Giờ Vàng…) → null */
+    /** Trang xem gốc theo tab nguồn (khi m3u8 bị CDN chặn trên SportsH) */
     function originSiteFor(m) {
       const src = (m && m._source) || "xoiche";
       if (src === "gavang") return { label: "Gà Vàng", url: "https://gavang1.xyz/" };
       if (src === "cola") return { label: "Cola", url: "https://colatv.watch/" };
+      if (src === "chuoichien") return { label: "Chuối Chiên", url: "https://live11.chuoichientv.me/" };
+      if (src === "saoke") return { label: "Sao Kê", url: "https://xoilacxcp.tv/" };
       if (src === "soop_bida") {
         const u = m && m.primary_stream_url;
         return {
@@ -1236,8 +1238,12 @@
             : "https://xoiche.live/"
         };
       }
-      // giovang / phalang / … — không có trang xem online ổn định
       return null;
+    }
+    /** Host CDN thường chặn phát ngoài domain gốc */
+    function streamLikelyNeedsSite(url) {
+      const u = String(url || "").toLowerCase();
+      return /edgemaxcdn|chuoichien|wecile|yefpwmc|livetl|zktsva|ap-northeast-1\.playback\.live-video/.test(u);
     }
 
     /** Flashscore search — tỷ số / thống kê trên site gốc */
@@ -1690,26 +1696,26 @@
     }
 
     function dedupeExternalMatches(list) {
+      // Chỉ gộp trong CÙNG nguồn — không xóa Cola vì trùng giờ với Chuối Chiên
       const map = new Map();
       for (const m of list) {
-        const t = (m.start_time || m.match_time || "").toString().slice(0, 16);
+        const src = (m._source || "other").toLowerCase();
+        const t0 = (m.start_time || m.match_time || "").toString().slice(0, 16);
         const a = normTeamKey(m.home_team_name);
         const b = normTeamKey(m.away_team_name);
         if (!a || !b) continue;
-        const key = [t, a, b].sort().join("|"); // sort teams to catch home/away swap
-        // key better: time + both teams sorted
-        const key2 = t + "|" + [a, b].sort().join("|");
+        const key2 = src + "|" + t0 + "|" + [a, b].sort().join("|");
         const prev = map.get(key2);
         if (!prev) {
           map.set(key2, m);
           continue;
         }
-        // Ưu tiên tên dài hơn / có logo / nguồn adviceme-style (không chứa binh phuoc sai)
         const score = (x) => {
           let s = 0;
           s += String(x.home_team_name || "").length + String(x.away_team_name || "").length;
           if (x.home_team_logo) s += 20;
           if (getStreams(x).length) s += 50;
+          if (x.home_score != null) s += 30;
           return s;
         };
         if (score(m) > score(prev)) map.set(key2, m);
@@ -2616,9 +2622,17 @@
         return;
       }
 
-      if (parsed.needsReferer) {
-        showFail("Kênh này chặn xem trên web (cần Referer từ trang gốc). Hãy bấm «Xem trên site gốc» hoặc dùng app IPTV.");
-        return;
+      if (parsed.needsReferer || streamLikelyNeedsSite(url)) {
+        // Vẫn thử HLS; nếu host hay chặn thì báo rõ mở đúng site nguồn
+        if (parsed.needsReferer) {
+          const o = originSiteFor(currentPlayMatch || matchCtx || null);
+          showFail(
+            o
+              ? ("Nguồn này chặn xem nhúng trên SportsH. Bấm «Xem trên " + o.label + "» (cùng cách bạn xem trên web nguồn).")
+              : "Nguồn này chặn xem nhúng (cần Referer). Dùng app IPTV hoặc mở site nguồn."
+          );
+          return;
+        }
       }
 
       playLoadTimer = setTimeout(() => {

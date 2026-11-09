@@ -1,4 +1,4 @@
-SportsH v2.3.5
-- Bỏ gắn stream chéo nguồn (Xoiche ≠ Cola)
-- Tab nguồn độc lập: mỗi trận chỉ thuộc một nguồn
-- Xoiche NO LINK vẫn NO LINK; xem Cola ở tab Cola
+SportsH v2.3.6
+- Dedupe chỉ trong cùng nguồn → Cola không bị mất vì trùng Chuối Chiên
+- Nguồn CDN (Chuối Chiên…): nút/mở trang gốc khi không phát nhúng được
+- Tab nguồn độc lập giữ nguyên
