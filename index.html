@@ -1190,7 +1190,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.3.3";
+    const APP_VERSION = "2.3.4";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -2836,21 +2836,43 @@
         return;
       }
 
+      // Ưu tiên tên chứa Cola / nguồn ổn định web
+      streams = streams.slice().sort((a, b) => {
+        const score = (s) => {
+          const n = (s.name || "").toLowerCase();
+          if (n.includes("cola")) return 0;
+          if (n.includes("gà") || n.includes("gavang")) return 1;
+          if (n.includes("chuối") || n.includes("chuoichien")) return 9;
+          return 5;
+        };
+        return score(a) - score(b);
+      });
+
+      // Hàng đợi fallback khi CDN chặn
+      const ctx = Object.assign({}, m);
+      const playWithQueue = (startIdx) => {
+        const rest = streams.slice(startIdx + 1).map((s) => ({ url: s.url, name: s.name }));
+        ctx._playQueue = rest;
+        const s0 = streams[startIdx];
+        playUrl(s0.url, matchTitle + " · " + s0.name, ctx, session);
+      };
+
       if (streams.length === 1) {
-        playUrl(streams[0].url, matchTitle + " · " + streams[0].name, m, session);
+        playWithQueue(0);
         return;
       }
 
-      // Nhiều BLV → chọn
-      document.getElementById("playerTitle").textContent = matchTitle + " · Chọn BLV";
+      // Tự phát nguồn ưu tiên (Cola…); vẫn hiện chọn BLV
+      playWithQueue(0);
+      document.getElementById("playerTitle").textContent = matchTitle + " · " + streams[0].name;
       const list = document.getElementById("blvPickerList");
       list.innerHTML = "";
-      streams.forEach(s => {
+      streams.forEach((s, i) => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "blv-pick-btn";
-        btn.textContent = "▶  " + s.name;
-        btn.addEventListener("click", () => playUrl(s.url, matchTitle + " · " + s.name, m, session));
+        btn.textContent = (i === 0 ? "▶  " : "   ") + s.name;
+        btn.addEventListener("click", () => playWithQueue(i));
         list.appendChild(btn);
       });
       picker.classList.add("open");

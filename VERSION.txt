@@ -1,3 +1,4 @@
-SportsH v2.3.3
-- Parse M3U không có dấu |: "12:00 09/11 ⚽ Erchim vs Khovd…"
-- Hiện tab Cola / gắn stream vào Xoiche NO LINK
+SportsH v2.3.4 — Đúng tư duy đa nguồn
+- Gắn stream: ưu tiên Cola > Gà Vàng > … > Chuối Chiên (CDN hay chặn)
+- Gom nhiều nguồn vào BLV picker; auto phát Cola trước
+- CDN lỗi → tự thử URL kế; nút ngoài mở Cola (không ép Xoiche khi Xoiche không có link)
