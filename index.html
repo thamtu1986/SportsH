@@ -1190,7 +1190,7 @@
     ];
     let preferProxy = typeof location !== "undefined" && /github\.io$/i.test(location.hostname);
 
-    const APP_VERSION = "2.2.8";
+    const APP_VERSION = "2.3.0";
     /** Cloudflare Worker stream resolver — điền URL sau khi deploy (để trống = tắt) */
     const RESOLVER_BASE = ""; // ví dụ: "https://sportsh-stream-resolver.xxx.workers.dev"
     const RESOLVER_KEY = "";  // chỉ khi Worker bật RESOLVER_SECRET
@@ -1717,6 +1717,91 @@
       return Array.from(map.values());
     }
 
+    function teamPairKey(home, away) {
+      const h = normScoreKey(home), a = normScoreKey(away);
+      if (!h || !a) return "";
+      return h < a ? h + "||" + a : a + "||" + h;
+    }
+    /**
+     * Gộp tỷ số Cola API → card M3U cùng fixture.
+     * SH-39/41: bắt buộc ngày ±36h, league nếu có, đúng 1 ứng viên — không chỉ cặp đội.
+     */
+    function mergeExternalScores(list) {
+      // Chỉ lấy nguồn có điểm đáng tin (cola / có _scoreSource API)
+      const donors = [];
+      for (const m of list) {
+        const hs = m.home_score ?? m.homeScore;
+        const as = m.away_score ?? m.awayScore;
+        if (hs === null || hs === undefined || as === null || as === undefined) continue;
+        const src = (m._source || "").toLowerCase();
+        // Ưu tiên cola; cho phép bản đã merge từ cola-api
+        if (src !== "cola" && m._scoreSource !== "external-merge" && m._scoreSource !== "cola-api") {
+          // Vẫn chấp nhận nếu có start_time rõ (API có cấu trúc)
+          if (!m.start_time) continue;
+        }
+        const home = (m.home_team && m.home_team.name) || m.home_team_name || "";
+        const away = (m.away_team && m.away_team.name) || m.away_team_name || "";
+        const ts = m.start_time ? Date.parse(m.start_time) : NaN;
+        if (!Number.isFinite(ts)) continue; // SH-41: bắt buộc có thời gian
+        donors.push({
+          hs, as,
+          homeN: normScoreKey(home),
+          awayN: normScoreKey(away),
+          pair: teamPairKey(home, away),
+          ts,
+          league: normScoreKey(m.tournament_name || m.league || ""),
+          status: m.status,
+          start_time: m.start_time,
+          source: src
+        });
+      }
+
+      return list.map((m) => {
+        const curH = m.home_score ?? m.homeScore;
+        const curA = m.away_score ?? m.awayScore;
+        if (curH !== null && curH !== undefined && curA !== null && curA !== undefined) return m;
+
+        const home = (m.home_team && m.home_team.name) || m.home_team_name || "";
+        const away = (m.away_team && m.away_team.name) || m.away_team_name || "";
+        const pair = teamPairKey(home, away);
+        if (!pair) return m;
+        const mTs = m.start_time ? Date.parse(m.start_time) : NaN;
+        if (!Number.isFinite(mTs)) return m; // thiếu giờ → không merge
+        const leagueM = normScoreKey(m.tournament_name || m.league || "");
+
+        const candidates = [];
+        for (const d of donors) {
+          if (d.pair !== pair) continue;
+          // ngày ±36h
+          if (Math.abs(mTs - d.ts) > 36 * 3600e3) continue;
+          // league: một phía có / một phía không → từ chối; cả hai có → token chung
+          if ((leagueM && !d.league) || (!leagueM && d.league)) continue;
+          if (leagueM && d.league) {
+            const tm = new Set(leagueM.split(" ").filter((w) => w.length > 2));
+            const ts = new Set(d.league.split(" ").filter((w) => w.length > 2));
+            let ok = false;
+            for (const w of tm) if (ts.has(w)) { ok = true; break; }
+            if (!ok) continue;
+          }
+          candidates.push(d);
+        }
+        if (candidates.length !== 1) return m; // unique candidate only
+
+        const hit = candidates[0];
+        const out = Object.assign({}, m);
+        if (normScoreKey(home) === hit.homeN) {
+          out.home_score = hit.hs;
+          out.away_score = hit.as;
+        } else {
+          out.home_score = hit.as;
+          out.away_score = hit.hs;
+        }
+        if ((!out.status || out.status === "scheduled") && hit.status === "live") out.status = "live";
+        out._scoreSource = "external-merge";
+        return out;
+      });
+    }
+
     function channelToMatch(ch, idx) {
       // Tên dạng: "15:30 - 02/11 | Team A VS Team B (League) | BLV"
       const name = ch.name || "Kênh";
@@ -1897,6 +1982,8 @@
             scoreOverlay = scoresRaw;
           }
           let extra = (extraRaw || []).map((ch, i) => channelToMatch(ch, i)).filter(Boolean);
+          // Gộp tỷ số theo cặp đội: bản Cola API có điểm → gắn vào card M3U cùng trận (URL khác nhau)
+          extra = mergeExternalScores(extra);
           // P0 Data freshness: bỏ stream ngoài quá hạn (finished > 6h, scheduled > 36h tới / không có giờ)
           const nowMs = Date.now();
           extra = extra.filter((m) => {

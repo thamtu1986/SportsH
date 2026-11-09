@@ -1,8 +1,4 @@
-SportsH v2.2.8 — Audit P0 close-out (SH-29..33)
-- live_fetched_at / fixtures_fetched_at tách khỏi updated_at
-- Fixtures theo ngày: tối đa ~ mỗi 6h (không 288/ngày)
-- Live API: throttle 25p theo live_fetched_at; lỗi không refresh timestamp
-- Score overlay: chỉ football; league một phía → không ghép
-- channelToMatch: postponed/cancelled → _statusDetail
-- validateStreamUrl: pathname must endswith .m3u8
-(+ v2.2.6 Cola scores, v2.2.7 live minute clock)
+SportsH v2.3.0 — Score Integrity & transaction-safe refresh
+SH-39/41: mergeExternalScores — date ±36h, league, unique candidate, bắt buộc start_time
+SH-37: fixtures_fetched_at chỉ khi ≥1 ngày response hợp lệ
+SH-38: fetch lỗi 1 ngày → giữ items cũ đúng ngày đó
