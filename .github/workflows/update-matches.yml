@@ -602,31 +602,70 @@ jobs:
                       "hs": hs, "as": aws, "status": mstatus,
                       "start": start_iso, "homeN": hn, "awayN": an,
                   }
+              def _tokens(s):
+                  return [w for w in _norm(s).split() if len(w) > 2]
+
+              def _name_compat(a, b):
+                  na, nb = _norm(a), _norm(b)
+                  if not na or not nb:
+                      return False
+                  if na == nb or na in nb or nb in na:
+                      return True
+                  ta, tb = _tokens(a), _tokens(b)
+                  if not ta or not tb:
+                      return False
+                  short, long = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+                  if all(w in long for w in short):
+                      return True
+                  return any(len(w) >= 4 and w in tb for w in ta)
+
               patched = 0
               for ch in all_ch:
                   if ch.get("home_score") is not None and ch.get("away_score") is not None:
                       continue
                   name = ch.get("name") or ""
-                  parts = [p.strip() for p in name.split("|")]
-                  mid = parts[1] if len(parts) >= 2 else parts[0]
-                  mid = re.sub(r"^[\W0-9\s:/-]+", "", mid)
-                  mid = re.sub(r"[⚽🟢🟡🔴]", "", mid).strip()
-                  vs = re.split(r"\s+VS\s+|\s+vs\s+", mid, maxsplit=1)
-                  if len(vs) < 2:
-                      vs = re.split(r"\s+v\s+", mid, maxsplit=1)
+                  # bỏ prefix giờ/emoji
+                  mid = re.sub(r"[⚽🟢🟡🔴]", " ", name)
+                  mid = re.sub(r"\d{1,2}:\d{2}", " ", mid)
+                  mid = re.sub(r"\d{1,2}/\d{1,2}", " ", mid)
+                  mid = re.sub(r"\[.*?\]", " ", mid)
+                  parts = [p.strip() for p in mid.split("|") if p.strip()]
+                  body = parts[1] if len(parts) >= 2 else (parts[0] if parts else mid)
+                  vs = re.split(r"\s+VS\s+|\s+vs\s+|\s+v\s+", body, maxsplit=1)
                   if len(vs) < 2:
                       continue
-                  home = re.sub(r"\([^)]*\)\s*$", "", vs[0]).strip()
-                  away = re.sub(r"\([^)]*\).*$", "", vs[1]).strip()
-                  away = re.sub(r"\[.*$", "", away).strip()
+                  home = re.sub(r"\([^)]*\)", " ", vs[0]).strip()
+                  away = re.sub(r"\([^)]*\)", " ", vs[1]).strip()
+                  home = re.sub(r"\s+", " ", home).strip()
+                  away = re.sub(r"\s+", " ", away).strip()
+                  if not home or not away:
+                      continue
+                  hit = None
+                  orient = 1
+                  # exact pair
                   hn, an = _norm(home), _norm(away)
-                  if not hn or not an:
-                      continue
                   pair = hn + "||" + an if hn < an else an + "||" + hn
                   hit = score_map.get(pair)
+                  if hit:
+                      orient = 1 if hn == hit["homeN"] else -1
+                  else:
+                      # fuzzy: một ứng viên duy nhất tương thích tên
+                      cands = []
+                      for pkey, sc in score_map.items():
+                          ok1 = _name_compat(home, sc["homeN"]) and _name_compat(away, sc["awayN"])
+                          ok2 = _name_compat(home, sc["awayN"]) and _name_compat(away, sc["homeN"])
+                          # sc keys are already norm strings stored as homeN/awayN
+                          ok1 = _name_compat(home, sc["homeN"]) and _name_compat(away, sc["awayN"])
+                          ok2 = _name_compat(home, sc["awayN"]) and _name_compat(away, sc["homeN"])
+                          if ok1:
+                              cands.append((sc, 1))
+                          elif ok2:
+                              cands.append((sc, -1))
+                      if len(cands) == 1:
+                          hit, orient = cands[0]
                   if not hit:
                       continue
-                  if hn == hit["homeN"]:
+                  if orient == 1:
                       ch["home_score"], ch["away_score"] = hit["hs"], hit["as"]
                   else:
                       ch["home_score"], ch["away_score"] = hit["as"], hit["hs"]
